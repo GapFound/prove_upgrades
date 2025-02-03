@@ -965,7 +965,7 @@ with col1:
                     <div style="font-size: 22px; font-weight: bold;margin-bottom: 2px;">{nome_ticker.upper()}</div>
                     <div style="font-size: 12px;"><b>{st.session_state['nationality_exchange']['nation']} - {st.session_state['nationality_exchange']['exchange']}</b></div>
                     <div style="font-size: 13px;">{st.session_state['sector_industry']['sector']}</div>
-                    <div style="font-size: 14px;">{st.session_state['sector_industry']['industry']}</div>
+                    <div style="font-size: 13px;">{st.session_state['sector_industry']['industry']}</div>
                     <br> <!-- Rigo vuoto aggiunto qui -->
                     """, unsafe_allow_html=True)
 
