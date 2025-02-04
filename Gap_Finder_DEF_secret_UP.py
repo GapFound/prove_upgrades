@@ -1133,15 +1133,28 @@ with col2:
                                   # Mostra l'output con la data formattata
                                    
                                 with col2_5: 
+                                    # st.markdown(f"""
+                                    #             <div style="text-align:left; font-size: 13px;">
+                                    #             <strong style="color: red;">{data_da_stampa}</strong>&nbsp;
+                                    #             <a href="{b['Link']}" style="text-decoration: none; color: black;">
+                                    #             {b['Title']}
+                                    #             </a>
+                                    #             </div>
+                                            
+                                    #             """, unsafe_allow_html=True)
+                                    
                                     st.markdown(f"""
                                                 <div style="text-align:left; font-size: 13px;">
-                                                <strong style="color: red;">{data_da_stampa}</strong>&nbsp;
-                                                <a href="{b['Link']}" style="text-decoration: none; color: black;">
-                                                {b['Title']}
-                                                </a>
+                                                    <strong style="color: red;">{data_da_stampa}</strong>&nbsp;
+                                                    <a href="{b['Link']}" style="text-decoration: none; color: inherit;">
+                                                        {b['Title']}
+                                                    </a>
                                                 </div>
+                                            """, unsafe_allow_html=True)
                                             
-                                                """, unsafe_allow_html=True)
+                                            
+                                            
+                                            
                                                 
                    if isinstance(st.session_state['news'],str): #and len(st.session_state['news'])>0:
                            st.markdown(f"""
