@@ -1037,8 +1037,7 @@ with col1:
             st.write("")
             st.write("")
             
-            if website:  # ← aggiungi questo controllo
-                st.markdown(f"""
+            st.markdown(f"""
                     <div style="font-size: 22px; font-weight: bold; margin-bottom: 2px;">
                         <a href="{website}" target="_blank" style="text-decoration: none; color: inherit;">
                             {nome_ticker.upper()}
@@ -1052,21 +1051,7 @@ with col1:
                         {st.session_state['sector_industry']['industry']}
                     </div>
                     <br>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                    <div style="font-size: 22px; font-weight: bold; margin-bottom: 2px;">
-                        {nome_ticker.upper()}
-                    </div>
-                    <div style="font-size: 12px;"><b>{st.session_state['nationality_exchange']['nation']} - {st.session_state['nationality_exchange']['exchange']}</b></div>
-                    <div style="font-size: 13px; font-weight: normal; color: #444;">
-                        {st.session_state['sector_industry']['sector']}
-                    </div>
-                    <div style="font-size: 13px; font-weight: normal; color: #444;">
-                        {st.session_state['sector_industry']['industry']}
-                    </div>
-                    <br>
-                """, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
 
                     # <div style="font-size: 14px;">  
                     # <b>market cap</b>: {st.session_state['fondamentali_finvitz']['market cap']}<br>
