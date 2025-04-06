@@ -921,6 +921,7 @@ with col1:
                 CACHE_DIR = "cache"
                 path_contatore = os.path.join(CACHE_DIR,'contatore.pkl')
                 path_contatore_daily = os.path.join(CACHE_DIR,'contatore_daily.pkl')
+                path_data_start_contatore = os.path.join(CACHE_DIR,'data_start_contatore.pkl')
                 
                 if os.path.exists(path_contatore):
                         with open(path_contatore,'rb') as f:
@@ -935,6 +936,10 @@ with col1:
                     os.makedirs(CACHE_DIR,exist_ok=True)
                     with open(path_contatore,'wb') as f:
                         pickle.dump(1,f)
+                        
+                    with open(path_data_start_contatore,'wb') as f:
+                        data_start = datetime.strftime(datetime.now().date(),"%Y-%m-%d")
+                        pickle.dump(data_start,f)
                         
                 #----        
                             
@@ -966,17 +971,34 @@ with col1:
                 CACHE_DIR = "cache"
                 path_contatore = os.path.join(CACHE_DIR,'contatore.pkl')
                 path_contatore_daily = os.path.join(CACHE_DIR,'contatore_daily.pkl')
+                path_data_start_contatore = os.path.join(CACHE_DIR,'data_start_contatore.pkl')
                 
                 if os.path.exists(path_contatore):
                         with open(path_contatore,'rb') as f:
                             valore_contatore = pickle.load(f)
                             st.write(valore_contatore)
                             
+                            
                 else:
                     os.makedirs(CACHE_DIR,exist_ok = True)
                     with open(path_contatore,'wb') as f:
                         pickle.dump(0,f)
                         
+                        
+                
+                if os.path.exists(path_data_start_contatore):            
+                        with open(path_data_start_contatore,'rb') as f:
+                            data_start = pickle.load(f) 
+                             
+                        st.write(data_start)
+                                
+                else:
+                     os.makedirs(CACHE_DIR,exist_ok = True)
+                     with open(path_data_start_contatore,'wb') as f:
+                         data_start = datetime.strftime(datetime.now().date(),"%Y-%m-%d")
+                         pickle.dump(data_start,f)
+                         
+                         
                         
                             
                 if os.path.exists(path_contatore_daily):            
@@ -986,12 +1008,13 @@ with col1:
                         st.write(valore_contatore_daily)
                         st.write(os.listdir('cache'))  
                         
+                        
                                   
                 else:
                     os.makedirs(CACHE_DIR,exist_ok = True)
                     with open(path_contatore_daily,'wb') as f:
                         pickle.dump(0,f)    
-                
+                        
             
             
             
