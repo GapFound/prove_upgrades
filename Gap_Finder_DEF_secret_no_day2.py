@@ -1039,7 +1039,7 @@ with col1:
             
             st.markdown(f"""
                     <div style="font-size: 22px; font-weight: bold; margin-bottom: 2px;">
-                        <a href="{website}" target="_blank" style="text-decoration: none; color: inherit;">
+                        <a href="{st.session_state['website']}" target="_blank" style="text-decoration: none; color: inherit;">
                             {nome_ticker.upper()}
                         </a>
                     </div>
