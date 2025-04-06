@@ -235,6 +235,7 @@ def fondamentali_func(nome_ticker):
     
     
     market_cap = 'M.Cap'
+    outstanding = 'Outstand.'
     shares_float = 'Float'
     insider_own =  'Insider'
     inst_own = 'Inst.O.'
@@ -270,10 +271,14 @@ def fondamentali_func(nome_ticker):
             except:
                 perc_corretta = ' - '
                 
-            return perc_corretta    
+            return perc_corretta 
+        
+        
                 
-
-        fondamentali_yf = {market_cap: prendi_trasforma_valore('marketCap'),           
+        website = fond['website']
+        
+        fondamentali_yf = {market_cap: prendi_trasforma_valore('marketCap'), 
+                            outstanding : prendi_trasforma_valore('sharesOutstanding'),
                             shares_float: prendi_trasforma_valore('floatShares'),
                             insider_own: aggiusto_perc('heldPercentInsiders'),
                             inst_own: aggiusto_perc('heldPercentInstitutions'),
@@ -282,7 +287,8 @@ def fondamentali_func(nome_ticker):
         
     except:  
         
-        fondamentali_yf = {market_cap:' - ',           
+        fondamentali_yf = {market_cap:' - ',
+                        outstanding: ' - ',   
                         shares_float:' - ',
                         insider_own:' - ',
                         inst_own:' - ',
@@ -326,8 +332,9 @@ def fondamentali_func(nome_ticker):
                 sector_industry = {'sector':prendi_voce("Sector"),
                                 'industry':prendi_voce("Industry")}
                 
-                fondamentali_fz = {market_cap: prendi_voce('Market Cap'),           
-                                shares_float: prendi_voce('Shs Float'),
+                fondamentali_fz = {market_cap: prendi_voce('Market Cap'),
+                                 outstanding:prendi_voce('Shs Outstand'),
+                                shares_float:prendi_voce('Shs Float'),
                                 insider_own:prendi_voce('Insider Own'),
                                 inst_own: prendi_voce('Inst Own'),
                                 short_float:prendi_voce('Short Float')}
@@ -350,7 +357,8 @@ def fondamentali_func(nome_ticker):
         
     if tentativi == 5: 
         #print("caricamento dati fondamentali da FINVITZ fallito")
-        fondamentali_fz = {market_cap:' - ',           
+        fondamentali_fz = {market_cap:' - ',
+                        outstanding: ' - ',   
                         shares_float:' - ',
                         insider_own:' - ',
                         inst_own:' - ',
@@ -361,9 +369,12 @@ def fondamentali_func(nome_ticker):
         sector_industry = {'sector':' - ','industry':' - '}
         news = 'problemi nel caricamento delle news da Finviz'
         #return fondamentali 
-        #print(fondamentali_fz)
         
-        
+    
+    
+    # print(fondamentali_yf)   
+    # print(fondamentali_fz)
+     
         
     fond_fz_df = pd.DataFrame({'a':fondamentali_fz.keys(),'Fz':fondamentali_fz.values()})
     #print(fond_fz_df)
@@ -377,7 +388,7 @@ def fondamentali_func(nome_ticker):
     
         
 
-    return fond_df,nationality_exchange,sector_industry
+    return fond_df,nationality_exchange,sector_industry,website
 
 
 #%%
@@ -992,12 +1003,13 @@ with col1:
              
                 dati_storici_ADJ,dati_storici_DEF = elaborazione(dati_yfinance)
                 #dati_split = stock_split(dati_yfinance)
-                fondamentali,nationality_exchange,sector_industry = fondamentali_func(nome_ticker)
+                fondamentali,nationality_exchange,sector_industry,website = fondamentali_func(nome_ticker)
                 news = news_func(nome_ticker)
                 
                 
                 st.session_state['dati_storici'] = dati_storici_DEF #dati_yfinance
                 st.session_state['fondamentali'] = fondamentali
+                st.session_state['website'] = website
                 st.session_state['nationality_exchange'] = nationality_exchange
                 st.session_state['sector_industry'] = sector_industry
                 st.session_state['news'] = news
@@ -1026,11 +1038,19 @@ with col1:
             st.write("")
             
             st.markdown(f"""
-                    <div style="font-size: 22px; font-weight: bold;margin-bottom: 2px;">{nome_ticker.upper()}</div>
+                    <div style="font-size: 22px; font-weight: bold; margin-bottom: 2px;">
+                        <a href="{website}" target="_blank" style="text-decoration: none; color: inherit;">
+                            {nome_ticker.upper()}
+                        </a>
+                    </div>
                     <div style="font-size: 12px;"><b>{st.session_state['nationality_exchange']['nation']} - {st.session_state['nationality_exchange']['exchange']}</b></div>
-                    <div style="font-size: 13px;">{st.session_state['sector_industry']['sector']}</div>
-                    <div style="font-size: 13px;">{st.session_state['sector_industry']['industry']}</div>
-                    <br> <!-- Rigo vuoto aggiunto qui -->
+                    <div style="font-size: 13px; font-weight: normal; color: #444;">
+                        {st.session_state['sector_industry']['sector']}
+                    </div>
+                    <div style="font-size: 13px; font-weight: normal; color: #444;">
+                        {st.session_state['sector_industry']['industry']}
+                    </div>
+                    <br>
                     """, unsafe_allow_html=True)
 
                     # <div style="font-size: 14px;">  
