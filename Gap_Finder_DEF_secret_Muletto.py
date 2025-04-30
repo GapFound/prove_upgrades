@@ -561,9 +561,10 @@ def yfinance_func(nome_ticker):
 
 
 
-    except:
+    except Exception as e:
         
         st.write('Yfinance server busy at the moment - try again') 
+        st.write(e)
         #return dati_storici,splits_format
         
 
