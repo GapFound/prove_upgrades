@@ -443,7 +443,7 @@ def news_func(nome_ticker):
 def yfinance_func(nome_ticker):
     
     
-    dati_storici = pd.DataFrame ; splits_format = []
+    #dati_storici = pd.DataFrame ; splits_format = []
     # inserisci un TRY QUI. TRY a prendere i dati storici EXCEPT: STORICO sul PREZZO non disponibile.
     # dopo qualche mese e qualche errore...Inserito!
     
@@ -564,7 +564,7 @@ def yfinance_func(nome_ticker):
     except:
         
         st.write('Yfinance server busy at the moment - try again') 
-        return dati_storici,splits_format
+        #return dati_storici,splits_format
         
 
 #%%
