@@ -541,7 +541,7 @@ def alphavantage_func(nome_ticker):
                 '4. close': 'Close',
                 '5. volume': 'Volume'},inplace=True)
 
-
+            st.write(dati_storici[:5])
             #dati_storici.index = pd.to_datetime(df.index)
             #dati_storici.sort_index(ascending=True,inplace=True)
             
