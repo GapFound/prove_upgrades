@@ -574,6 +574,10 @@ def alphavantage_func(nome_ticker):
                 
         
             if not splits_df.empty:
+
+
+                st.write(dati_storici[:5])    
+                st.write(splits_df)    
                 
                 dati_storici.index = pd.to_datetime(dati_storici.index).normalize()
                 dati_storici.sort_index(ascending=True,inplace=True)
@@ -602,8 +606,7 @@ def alphavantage_func(nome_ticker):
                 dati_storici['Stock Splits'] = pd.to_numeric(dati_storici['Stock Splits'],errors='coerce')
 
 
-                st.write(dati_storici[:5])    
-                st.write(splits_df)    
+                
                 
             else: 
                 print('il ticker non ha splits/reverse splits, oppure...')
