@@ -593,14 +593,17 @@ def alphavantage_func(nome_ticker):
                 splits_df['split_factor'] = pd.to_numeric(splits_df['split_factor'],errors='coerce')
                 
                 
-                st.write(dati_storici[:5])    
-                st.write(splits_df) 
+                
                
                 
                 dati_storici = dati_storici.merge(splits_df['split_factor'],left_index=True,right_index=True,how='left')
                 dati_storici['split_factor'] = dati_storici['split_factor'].fillna(0)
                 
-               
+
+                st.write(dati_storici[-5:])    
+                st.write(splits_df) 
+
+                
         
                 dati_storici.drop('Stock Splits',axis=1,inplace=True)
                 dati_storici.rename(columns={'split_factor':'Stock Splits'},inplace=True)
