@@ -1208,7 +1208,7 @@ with col1:
             
             if not dati_yfinance.empty:
 
-                print(dati_yfinance.iloc[1,1])
+                st.write(type(dati_yfinance.iloc[0,2]))
                 st.write(dati_yfinance[:5])    
                 st.write(dati_split)   
              
