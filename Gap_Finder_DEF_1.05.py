@@ -1209,8 +1209,9 @@ with col1:
             if not dati_yfinance.empty:
 
                 st.write(dati_yfinance.iloc[0,2]+dati_yfinance.iloc[0,3])
+                st.write(dati_yfinance.shape)  
                 st.write(dati_yfinance[:5])    
-                st.write(dati_split)   
+                 
              
                 dati_storici_ADJ,dati_storici_DEF = elaborazione(dati_yfinance)
                 #dati_split = stock_split(dati_yfinance)
