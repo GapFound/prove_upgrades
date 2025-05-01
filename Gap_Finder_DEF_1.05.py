@@ -1036,7 +1036,7 @@ with col1:
           
         
     with st.form(key=f'GAPs_Finder'):
-            nome_ticker = st.text_input('**GAPs Finder v1.04pr**',placeholder='Enter the Ticker').strip()
+            nome_ticker = st.text_input('**GAPs Finder v1.05yf**',placeholder='Enter the Ticker').strip()
             bottone_ricerca = st.form_submit_button('ricerca GAPs')
          
     
