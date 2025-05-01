@@ -578,10 +578,10 @@ def alphavantage_func(nome_ticker):
 
                 
                 
-                dati_storici.index = pd.to_datetime(dati_storici.index)#.normalize()
+                dati_storici.index = pd.to_datetime(dati_storici.index).dt.date #.normalize()
                 dati_storici.sort_index(ascending=True,inplace=True)
                 
-                splits_df.index = pd.to_datetime(splits_df.index)#.normalize()
+                splits_df.index = pd.to_datetime(splits_df.index).dt.date #.normalize()
 
                   
                 
