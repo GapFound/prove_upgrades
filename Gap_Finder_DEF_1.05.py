@@ -583,17 +583,18 @@ def alphavantage_func(nome_ticker):
                 
                 splits_df.index = pd.to_datetime(splits_df.index).normalize()
 
-                st.write(dati_storici[:5])    
-                st.write(splits_df)    
+                  
                 
                 dati_storici['Open'] = pd.to_numeric(dati_storici['Open'], errors='coerce')
                 dati_storici['High'] = pd.to_numeric(dati_storici['High'], errors='coerce')
                 dati_storici['Low'] = pd.to_numeric(dati_storici['Low'], errors='coerce')
                 dati_storici['Close'] = pd.to_numeric(dati_storici['Close'], errors='coerce')
                 dati_storici['Volume'] = pd.to_numeric(dati_storici['Volume'], errors='coerce')
+                splits_df['split_factor'] = pd.to_numeric(splits_df['split_factor'],errors='coerce')
                 
                 
-                
+                st.write(dati_storici[:5])    
+                st.write(splits_df) 
                
                 
                 dati_storici = dati_storici.merge(splits_df['split_factor'],left_index=True,right_index=True,how='left')
