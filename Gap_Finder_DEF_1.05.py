@@ -569,7 +569,7 @@ def alphavantage_func(nome_ticker):
                 FMP_api_key = 'nopfSumXNz9cfBYNUweN06wZvl7nEPch'
                 splits_df = stock_split(nome_ticker,cache_file,FMP_api_key)
                
-            
+                splits_df['split_factor'] = pd.to_numeric(splits_df['split_factor'],errors="coerce")
                 
                 
         
@@ -603,7 +603,7 @@ def alphavantage_func(nome_ticker):
                 dati_storici.drop('Stock Splits',axis=1,inplace=True)
                 dati_storici.rename(columns={'split_factor':'Stock Splits'},inplace=True)
                 
-                dati_storici['Stock Splits'] = pd.to_numeric(dati_storici['Stock Splits'],errors='coerce')
+                #dati_storici['Stock Splits'] = pd.to_numeric(dati_storici['Stock Splits'],errors='coerce')
 
 
                 
