@@ -576,12 +576,13 @@ def alphavantage_func(nome_ticker):
             if not splits_df.empty:
 
 
+                #data.index = pd.to_datetime(data.index).date
+                #splits_df.index = pd.to_datetime(splits_df.index).date
                 
-                
-                dati_storici.index = pd.to_datetime(dati_storici.index).normalize()
+                dati_storici.index = pd.to_datetime(dati_storici.index).date
                 dati_storici.sort_index(ascending=True,inplace=True)
                 
-                splits_df.index = pd.to_datetime(splits_df.index).normalize()
+                splits_df.index = pd.to_datetime(splits_df.index).date
 
                   
                 
