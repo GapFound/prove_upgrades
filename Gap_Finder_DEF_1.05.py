@@ -582,7 +582,9 @@ def alphavantage_func(nome_ticker):
                 dati_storici.sort_index(ascending=True,inplace=True)
                 
                 splits_df.index = pd.to_datetime(splits_df.index).normalize()
-                
+
+                st.write(dati_storici[:5])    
+                st.write(splits_df)    
                 
                 dati_storici['Open'] = pd.to_numeric(dati_storici['Open'], errors='coerce')
                 dati_storici['High'] = pd.to_numeric(dati_storici['High'], errors='coerce')
@@ -590,8 +592,7 @@ def alphavantage_func(nome_ticker):
                 dati_storici['Close'] = pd.to_numeric(dati_storici['Close'], errors='coerce')
                 dati_storici['Volume'] = pd.to_numeric(dati_storici['Volume'], errors='coerce')
                 
-                #st.write(dati_storici[:5])    
-                #st.write(splits_df)    
+                
                 
                
                 
@@ -1208,9 +1209,9 @@ with col1:
             
             if not dati_yfinance.empty:
 
-                st.write(dati_yfinance.iloc[0,2]+dati_yfinance.iloc[0,3])
-                st.write(dati_yfinance[:5])  
-                st.write(dati_split[:5])    
+                #st.write(dati_yfinance.iloc[0,2]+dati_yfinance.iloc[0,3])
+                #st.write(dati_yfinance[:5])  
+                #st.write(dati_split[:5])    
                  
              
                 dati_storici_ADJ,dati_storici_DEF = elaborazione(dati_yfinance)
