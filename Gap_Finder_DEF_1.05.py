@@ -764,7 +764,8 @@ def ricerca_gaps(nome_ticker,dati_storici,gap_perc_A,gap_perc_B,volume,prezzo_A,
     
         display_gaps = gaps.copy()
             
-            
+        display_gaps['Date'] = display_gaps['Date'].dt.date
+        
         display_gaps['Volume'] = display_gaps.apply(lambda x: f"{x['Volume']:,.0f}".replace(',','.'),axis=1)
             
         display_gaps = display_gaps.round(2)
