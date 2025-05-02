@@ -700,7 +700,7 @@ def ricerca_gaps(nome_ticker,dati_storici,gap_perc_A,gap_perc_B,volume,prezzo_A,
     global gaps
     
     gaps = dati_storici.iloc[:,[0,1,2,3,4,5,8,9,10,-1,6]].copy()
-    
+    gaps['Date'] = gaps['Date'].dt.date
     
     # rettifico al valore originale i dati di ogni riga del df gaps:
     
@@ -901,7 +901,7 @@ def visual_gap(nome_ticker,n_gap,dati_storici_ADJ):
     
     # Layout
     fig.update_layout(
-    title=f"          <b>{nome_ticker.upper()}</b> -  Grafico Gap del {gaps.iloc[n_gap, 0].dt.date}",
+    title=f"          <b>{nome_ticker.upper()}</b> -  Grafico Gap del {gaps.iloc[n_gap, 0]}",
     yaxis_title="Prezzo",
     xaxis_rangeslider={'thickness': 0.08, 'visible': True},
     template="plotly_white",
