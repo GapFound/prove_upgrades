@@ -597,7 +597,7 @@ def alphavantage_func(nome_ticker):
                 
                 dati_storici.rename(columns={'split_factor':'Stock Splits'},inplace=True)
 
-                dati_storici['Date'] = dati_storici.index
+                dati_storici['Date'] = dati_storici.index.dt.date
                 
                 
                 
@@ -764,7 +764,7 @@ def ricerca_gaps(nome_ticker,dati_storici,gap_perc_A,gap_perc_B,volume,prezzo_A,
     
         display_gaps = gaps.copy()
             
-        display_gaps['Date'] = display_gaps['Date'].dt.date
+        #display_gaps['Date'] = display_gaps['Date'].dt.date
         
         display_gaps['Volume'] = display_gaps.apply(lambda x: f"{x['Volume']:,.0f}".replace(',','.'),axis=1)
             
