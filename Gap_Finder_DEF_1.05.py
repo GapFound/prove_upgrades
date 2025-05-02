@@ -597,7 +597,7 @@ def alphavantage_func(nome_ticker):
                 
                 dati_storici.rename(columns={'split_factor':'Stock Splits'},inplace=True)
 
-                dati_storici['Date'] = data.index
+                dati_storici['Date'] = dati_storici.index
                 
                 
                 
