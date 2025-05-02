@@ -901,7 +901,7 @@ def visual_gap(nome_ticker,n_gap,dati_storici_ADJ):
     
     # Layout
     fig.update_layout(
-    title=f"          <b>{nome_ticker.upper()}</b> -  Grafico Gap del {gaps.iloc[n_gap, 0]}",
+    title=f"          <b>{nome_ticker.upper()}</b> -  Grafico Gap del  {gaps.iloc[n_gap, 0]}",
     yaxis_title="Prezzo",
     xaxis_rangeslider={'thickness': 0.08, 'visible': True},
     template="plotly_white",
