@@ -699,7 +699,7 @@ def ricerca_gaps(nome_ticker,dati_storici,gap_perc_A,gap_perc_B,volume,prezzo_A,
     
     global gaps
     
-    gaps = dati_storici.iloc[:,[0,1,2,3,4,5,9,10,11,-1,6]].copy()
+    gaps = dati_storici.iloc[:,[0,1,2,3,4,5,8,9,10,-1,6]].copy()
     
     
     # rettifico al valore originale i dati di ogni riga del df gaps:
