@@ -80,55 +80,55 @@ def elaborazione(dati_storici):
     
     # creo un df transitorio dove inserire i risultati del calolo dello split factor:
 
-    trans = pd.DataFrame(index=range(0,len(dati_storici)))
-    trans['split_factor'] = 0
+    # trans = pd.DataFrame(index=range(0,len(dati_storici)))
+    # trans['split_factor'] = 0
 
 
 
-    # inizio con il calcolo:
+    # # inizio con il calcolo:
 
-    split_factor = 1
+    # split_factor = 1
 
 
-    for a in range((len(dati_storici)-1),-1,-1):
-            if dati_storici['Stock Splits'].iloc[a] > 0:
-                    #print(a)
+    # for a in range((len(dati_storici)-1),-1,-1):
+    #         if dati_storici['Stock Splits'].iloc[a] > 0:
+    #                 #print(a)
                     
-                    #aaa = split_factor
-                    trans.loc[a,'split_factor'] = split_factor
-                    split_factor = split_factor*dati_storici['Stock Splits'].iloc[a]
-                    #print(split_factor)                                                              
-                    #trans.loc[a,'split_factor'] = aaa
+    #                 #aaa = split_factor
+    #                 trans.loc[a,'split_factor'] = split_factor
+    #                 split_factor = split_factor*dati_storici['Stock Splits'].iloc[a]
+    #                 #print(split_factor)                                                              
+    #                 #trans.loc[a,'split_factor'] = aaa
                           
-            else:
+    #         else:
                 
-                    trans.loc[a,'split_factor']=split_factor
+    #                 trans.loc[a,'split_factor']=split_factor
 
                                 
                             
                             
                             
     
-    dati_storici['Open'] = dati_storici.apply(lambda x: x['Open']*trans.loc[x.name,'split_factor'] if\
-                              (trans.loc[x.name,'split_factor']< 1) else \
-                                  (x['Open']/trans.loc[x.name,'split_factor']),axis=1)
+    # dati_storici['Open'] = dati_storici.apply(lambda x: x['Open']*trans.loc[x.name,'split_factor'] if\
+    #                           (trans.loc[x.name,'split_factor']< 1) else \
+    #                               (x['Open']/trans.loc[x.name,'split_factor']),axis=1)
         
-    dati_storici['High'] = dati_storici.apply(lambda x: x['High']*trans.loc[x.name,'split_factor'] if\
-                              (trans.loc[x.name,'split_factor']< 1) else \
-                                  (x['High']/trans.loc[x.name,'split_factor']),axis=1)
+    # dati_storici['High'] = dati_storici.apply(lambda x: x['High']*trans.loc[x.name,'split_factor'] if\
+    #                           (trans.loc[x.name,'split_factor']< 1) else \
+    #                               (x['High']/trans.loc[x.name,'split_factor']),axis=1)
         
-    dati_storici['Low'] = dati_storici.apply(lambda x: x['Low']*trans.loc[x.name,'split_factor'] if\
-                              (trans.loc[x.name,'split_factor']< 1) else \
-                                  (x['Low']/trans.loc[x.name,'split_factor']),axis=1)
+    # dati_storici['Low'] = dati_storici.apply(lambda x: x['Low']*trans.loc[x.name,'split_factor'] if\
+    #                           (trans.loc[x.name,'split_factor']< 1) else \
+    #                               (x['Low']/trans.loc[x.name,'split_factor']),axis=1)
         
-    dati_storici['Close'] = dati_storici.apply(lambda x: x['Close']*trans.loc[x.name,'split_factor'] if\
-                              (trans.loc[x.name,'split_factor']< 1) else \
-                                  (x['Close']/trans.loc[x.name,'split_factor']),axis=1) 
+    # dati_storici['Close'] = dati_storici.apply(lambda x: x['Close']*trans.loc[x.name,'split_factor'] if\
+    #                           (trans.loc[x.name,'split_factor']< 1) else \
+    #                               (x['Close']/trans.loc[x.name,'split_factor']),axis=1) 
         
         
-    dati_storici['Volume'] = dati_storici.apply(lambda x: x['Volume']/trans.loc[x.name,'split_factor'] if\
-                              (trans.loc[x.name,'split_factor']< 1) else \
-                                  (x['Volume']*trans.loc[x.name,'split_factor']),axis=1)    
+    # dati_storici['Volume'] = dati_storici.apply(lambda x: x['Volume']/trans.loc[x.name,'split_factor'] if\
+    #                           (trans.loc[x.name,'split_factor']< 1) else \
+    #                               (x['Volume']*trans.loc[x.name,'split_factor']),axis=1)    
         
         
         
@@ -516,7 +516,8 @@ def alphavantage_func(nome_ticker):
     try:
          
         #ALPHA_api_key = st.secrets["ALPHA_api_key"]
-        ALPHA_api_key = 'KQ3M16DWT70EC0KY' # di GapFinder
+        #ALPHA_api_key = 'KQ3M16DWT70EC0KY' # di GapFinder
+        ALPHA_api_key = 'J2DCE529EEKRG0E4' # mia personale
         symbol = nome_ticker.upper()
         function = 'TIME_SERIES_DAILY'
         outputsize = 'full'
@@ -541,7 +542,7 @@ def alphavantage_func(nome_ticker):
                 '4. close': 'Close',
                 '5. volume': 'Volume'},inplace=True)
 
-            
+
             #dati_storici.index = pd.to_datetime(df.index)
             #dati_storici.sort_index(ascending=True,inplace=True)
             
@@ -569,54 +570,43 @@ def alphavantage_func(nome_ticker):
                 FMP_api_key = 'nopfSumXNz9cfBYNUweN06wZvl7nEPch'
                 splits_df = stock_split(nome_ticker,cache_file,FMP_api_key)
                
-                splits_df['split_factor'] = pd.to_numeric(splits_df['split_factor'],errors="coerce")
+            
+                
+                
+            print(splits_df)    
                 
                 
         
             if not splits_df.empty:
-
-
-                #data.index = pd.to_datetime(data.index).date
-                #splits_df.index = pd.to_datetime(splits_df.index).date
                 
-                dati_storici.index = pd.to_datetime(dati_storici.index).date
-                dati_storici.sort_index(ascending=True,inplace=True)
+                dati_storici.index = pd.to_datetime(dati_storici.index).normalize()
+                splits_df.index = pd.to_datetime(splits_df.index).normalize()
                 
-                splits_df.index = pd.to_datetime(splits_df.index).date
-
-                  
-                
-                dati_storici['Open'] = pd.to_numeric(dati_storici['Open'], errors='coerce')
-                dati_storici['High'] = pd.to_numeric(dati_storici['High'], errors='coerce')
-                dati_storici['Low'] = pd.to_numeric(dati_storici['Low'], errors='coerce')
-                dati_storici['Close'] = pd.to_numeric(dati_storici['Close'], errors='coerce')
-                dati_storici['Volume'] = pd.to_numeric(dati_storici['Volume'], errors='coerce')
-                splits_df['split_factor'] = pd.to_numeric(splits_df['split_factor'],errors='coerce')
-                
-                
-                
-               
                 
                 dati_storici = dati_storici.merge(splits_df['split_factor'],left_index=True,right_index=True,how='left')
+                
                 dati_storici['split_factor'] = dati_storici['split_factor'].fillna(0)
                 
-
-                st.write(dati_storici[-5:])    
-                st.write(splits_df) 
-
+                dati_storici.sort_index(ascending=True,inplace=True) # non servirebbe, i dati sono già ascendenti a differenza di yfinance
                 
-        
-                dati_storici.drop('Stock Splits',axis=1,inplace=True)
+                
+                # adesso trasformo in numeri le colonne di 'dati_storici' che sono di type 'str'
+                cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+                dati_storici[cols] = dati_storici[cols].apply(pd.to_numeric, errors='coerce')
+                
+                
                 dati_storici.rename(columns={'split_factor':'Stock Splits'},inplace=True)
+
+                dati_storici['Date'] = data.index
                 
-                #dati_storici['Stock Splits'] = pd.to_numeric(dati_storici['Stock Splits'],errors='coerce')
-
-
+                
+                
                 
                 
             else: 
                 print('il ticker non ha splits/reverse splits, oppure...')
                 print('non ho trovato i dati splits dal provider e quindi uso quelli base di YFINANCE')
+                dati_storici['Stock Splits'] = 0.0
                 
             
             
@@ -624,14 +614,27 @@ def alphavantage_func(nome_ticker):
             
             
             # APPORTO dei CORRETTIVI al DF dati_storici ORIGINALE e creo un DF splits_format per VISUALIZZARE gli SPLITS
-            dati_storici = dati_storici.reset_index()
-            dati_storici['Data'] = dati_storici['Date'].dt.date
-            dati_storici.drop('Date',inplace=True,axis=1)
-            dati_storici.rename(columns={'Data':'Date'},inplace=True)
+            
+            
+            dati_storici['Date'] = dati_storici.index
+            
             colonna_da_spostare = dati_storici.pop('Date')
+            
             dati_storici.insert(0,'Date',colonna_da_spostare)
             
+            dati_storici = dati_storici.reset_index(drop=True)
+            
+            
+            #dati_storici = dati_storici.reset_index()
+            #dati_storici['Data'] = dati_storici['Date'].dt.date
+            #dati_storici.drop('Date',inplace=True,axis=1)
+            #dati_storici.rename(columns={'Data':'Date'},inplace=True)
+            #colonna_da_spostare = dati_storici.pop('Date')
+            #dati_storici.insert(0,'Date',colonna_da_spostare)
+            
             splits_format = formatta_splits(dati_storici)
+            print('qui gli splits formattati')
+            print(splits_format)
             
             # if not splits_df.empty:
             #     splits_df = splits_df.sort_index()
@@ -640,7 +643,7 @@ def alphavantage_func(nome_ticker):
             #                                             if x<1 else f'{x:.1f}/1'.replace('.',','))
             
             
-            print(dati_storici[:10])    
+            #print(dati_storici[:10])    
                 
             
             return dati_storici,splits_format
@@ -1045,7 +1048,7 @@ with col1:
           
         
     with st.form(key=f'GAPs_Finder'):
-            nome_ticker = st.text_input('**GAPs Finder v1.05yf**',placeholder='Enter the Ticker').strip()
+            nome_ticker = st.text_input('**GAPsFinder v1.05ayf**',placeholder='Enter the Ticker').strip()
             bottone_ricerca = st.form_submit_button('ricerca GAPs')
          
     
@@ -1106,6 +1109,7 @@ with col1:
             if nome_ticker != 'contatore':
                 
                 dati_yfinance,dati_split = alphavantage_func(nome_ticker)
+                
                 
                 ## INCREMENTO o CREO il CONTATORE VISITE
                 CACHE_DIR = "cache"
@@ -1213,11 +1217,6 @@ with col1:
             
             
             if not dati_yfinance.empty:
-
-                #st.write(dati_yfinance.iloc[0,2]+dati_yfinance.iloc[0,3])
-                #st.write(dati_yfinance[:5])  
-                #st.write(dati_split[:5])    
-                 
              
                 dati_storici_ADJ,dati_storici_DEF = elaborazione(dati_yfinance)
                 #dati_split = stock_split(dati_yfinance)
