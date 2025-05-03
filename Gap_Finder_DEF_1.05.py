@@ -30,6 +30,8 @@ import pickle
 
 import os
 
+import sys
+
 #from st_aggrid import AgGrid
 
 
@@ -358,6 +360,7 @@ def fondamentali_func(nome_ticker):
         
     except:  
         
+        website = ""
         fondamentali_yf = {market_cap:' - ',
                         outstanding: ' - ',   
                         shares_float:' - ',
@@ -507,174 +510,263 @@ def news_func(nome_ticker):
 
 def alphavantage_func(nome_ticker):
     
-    dati_storici = []; splits_format = []
+    dati_storici = pd.DataFrame(); splits_format = pd.DataFrame(); caricato = 0 
     # inserisci un TRY QUI. TRY a prendere i dati storici EXCEPT: STORICO sul PREZZO non disponibile
     # dopo qualche mese e qualche errore...Inserito!
     
     # CARICO DA ALPHA_VANTAGE I DATI STORICI DI PREZZO
+        
+        
+    CACHE_DIR = "cache"
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    #print(os.listdir('cache'))
     
-    try:
-         
-        #ALPHA_api_key = st.secrets["ALPHA_api_key"]
-        #ALPHA_api_key = 'KQ3M16DWT70EC0KY' # di GapFinder
-        ALPHA_api_key = 'J2DCE529EEKRG0E4' # mia personale
-        symbol = nome_ticker.upper()
-        function = 'TIME_SERIES_DAILY'
-        outputsize = 'full'
-
-        url = f'https://www.alphavantage.co/query?function={function}&symbol={symbol}&outputsize={outputsize}&apikey={ALPHA_api_key}'
-
-        response = requests.get(url)
-        data = response.json()
-
-
-        # Verifica se la chiave esiste
-        if 'Time Series (Daily)' in data:
-            
         
-            time_series = data['Time Series (Daily)']
-            dati_storici = pd.DataFrame.from_dict(time_series, orient='index')
-
-            dati_storici.rename(columns={
-                '1. open': 'Open',
-                '2. high': 'High',
-                '3. low': 'Low',
-                '4. close': 'Close',
-                '5. volume': 'Volume'},inplace=True)
-
-
-            #dati_storici.index = pd.to_datetime(df.index)
-            #dati_storici.sort_index(ascending=True,inplace=True)
-            
+    cache_file = os.path.join(CACHE_DIR, f"{nome_ticker.upper()}.pkl") #nomina il file + la posizione che avrà quando sarà salvato nella cache
+    print(cache_file)
         
         
-    
-            CACHE_DIR = "cache"
-            os.makedirs(CACHE_DIR, exist_ok=True)
-            #print(os.listdir('cache'))
         
-            
-            cache_file = os.path.join(CACHE_DIR, f"{nome_ticker.upper()}.pkl") #nomina il file + la posizione che avrà quando sarà salvato nella cache
-            print(cache_file)
-            
-            
-            
-            if os.path.exists(cache_file):
-                with open(cache_file, "rb") as f:
-                    print(f"Caricamento dati splits {nome_ticker} dalla cache.")
-                    splits_df = pickle.load(f)
-            else:
+    if os.path.exists(cache_file):
+        
+          with open(cache_file, "rb") as fp:
+              print(f"Caricamento dati daily e splits {nome_ticker} dalla cache.")
+              cache_data = pickle.load(fp)
+              dati_storici = cache_data['dati_storici']
+              splits_format = cache_data['splits']
+              caricato = 1
+   
+   
+    if caricato == 0:
+        
+          
+          try:     
+                # DA QUI cerco sul FMP gli splits del ticker selezionato
+                print(f'provo a prendere i dati splits di {nome_ticker} da FMP')
                 
-                print('provo a prendere i dati dal provider')
                 #FMP_api_key = st.secrets["FMP_api_key"]
                 FMP_api_key = 'nopfSumXNz9cfBYNUweN06wZvl7nEPch'
                 splits_df = stock_split(nome_ticker,cache_file,FMP_api_key)
-               
+                
+                   
+          except:
+              
+               splits_df=pd.DataFrame()
+                
+         
             
+         
+            
+          try:
+              # DA QUI cerco su AlphaVantage i ddati aily del ticker selezionato
+              print(f'provo a prendere i dati daily di {nome_ticker} da AlphaVantage')
                 
                 
-            print(splits_df)    
-                
-                
+              #ALPHA_api_key = st.secrets["ALPHA_api_key"]
+              ALPHA_api_key = 'J2DCE529EEKRG0E4' # mia personale
+              symbol = nome_ticker.upper()
+              function = 'TIME_SERIES_DAILY'
+              outputsize = 'full'
         
-            if not splits_df.empty:
+              url = f'https://www.alphavantage.co/query?function={function}&symbol={symbol}&outputsize={outputsize}&apikey={ALPHA_api_key}'
+        
+              response = requests.get(url)
+              data = response.json()
+        
+        
+              # Verifica se la chiave esiste
+              if 'Time Series (Daily)' in data:
                 
-                dati_storici.index = pd.to_datetime(dati_storici.index).normalize()
-                splits_df.index = pd.to_datetime(splits_df.index).normalize()
+                  time_series = data['Time Series (Daily)']
+                  dati_storici = pd.DataFrame.from_dict(time_series, orient='index')
+            
+                  dati_storici.rename(columns={
+                      '1. open': 'Open',
+                      '2. high': 'High',
+                      '3. low': 'Low',
+                      '4. close': 'Close',
+                      '5. volume': 'Volume'},inplace=True)
+                  
+                  
+                  
+                  
+                  
+              dati_storici.index = pd.to_datetime(dati_storici.index).normalize()
+              
+              
+                
+              if not splits_df.empty:
+                
+                  
+                    splits_df.index = pd.to_datetime(splits_df.index).normalize()
+                        
+                        
+                    dati_storici = dati_storici.merge(splits_df['split_factor'],left_index=True,right_index=True,how='left')
+                        
+                    dati_storici['split_factor'] = dati_storici['split_factor'].fillna(0)
+                        
+                    dati_storici.sort_index(ascending=True,inplace=True) # non servirebbe, i dati sono già ascendenti a differenza di yfinance
+                        
+                        
+                    # adesso trasformo in numeri le colonne di 'dati_storici' che sono di type 'str'
+                    cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+                    dati_storici[cols] = dati_storici[cols].apply(pd.to_numeric, errors='coerce')
+                        
+                        
+                    dati_storici.rename(columns={'split_factor':'Stock Splits'},inplace=True)
+        
+                    #dati_storici['Date'] = dati_storici.index
+                    
                 
                 
-                dati_storici = dati_storici.merge(splits_df['split_factor'],left_index=True,right_index=True,how='left')
-                
-                dati_storici['split_factor'] = dati_storici['split_factor'].fillna(0)
-                
-                dati_storici.sort_index(ascending=True,inplace=True) # non servirebbe, i dati sono già ascendenti a differenza di yfinance
+              else: 
+              
+                print('il ticker non ha splits/reverse splits')
                 
                 
-                # adesso trasformo in numeri le colonne di 'dati_storici' che sono di type 'str'
                 cols = ['Open', 'High', 'Low', 'Close', 'Volume']
                 dati_storici[cols] = dati_storici[cols].apply(pd.to_numeric, errors='coerce')
                 
-                
-                dati_storici.rename(columns={'split_factor':'Stock Splits'},inplace=True)
-
-                dati_storici['Date'] = dati_storici.index.dt.date
-                
-                
-                
-                
-                
-            else: 
-                print('il ticker non ha splits/reverse splits, oppure...')
-                print('non ho trovato i dati splits dal provider e quindi uso quelli base di YFINANCE')
                 dati_storici['Stock Splits'] = 0.0
+                #dati_storici['Date'] = dati_storici.index
+                    
+                  
+                  
+                  
+                  
+               # APPORTO dei CORRETTIVI al DF dati_storici ORIGINALE e creo un DF splits_format per VISUALIZZARE gli SPLITS
+               
+               
+              dati_storici['Date'] = dati_storici.index
+               
+              colonna_da_spostare = dati_storici.pop('Date')
+               
+              dati_storici.insert(0,'Date',colonna_da_spostare)
+               
+              dati_storici['Date'] = dati_storici['Date'].dt.date
+               
+              dati_storici = dati_storici.reset_index(drop=True)
+               
+              
+              print (f'caricato = :{caricato}')
+              
+               
+               
+              if not splits_df.empty:
+                   
+                   splits_format = formatta_splits(dati_storici)
+                   print('qui gli splits formattati')
+                   print(splits_format)
+               
+             
+                
+              if caricato == 0:
+    
+                  with open(cache_file,'wb') as fp:
+                      pickle.dump({'dati_storici':dati_storici,'splits':splits_format},fp)
+                      print(f"sono qui ed ho scritto correttamente il file {nome_ticker}.pkl")
+                                        
+             
+                
+
+               
+              return dati_storici,splits_format    
+                  
+                 
+                  
+                 
+                    
+                  
+                  
+          except:
+            
+              st.write(f'Dati non disponibili per {nome_ticker}')
+              return dati_storici,splits_df
+         
+        
+          
+    else:
+        print(f'lo storico di {nome_ticker} pesa {sys.getsizeof(dati_storici)/1024:.2f} Kbytes')
+        return dati_storici,splits_format  
+              
+             
+                
+         
+              
+              
+              
+                  
+                  
+                    
+            
+          
+            
+            
+            
+            # # APPORTO dei CORRETTIVI al DF dati_storici ORIGINALE e creo un DF splits_format per VISUALIZZARE gli SPLITS
+            
+            
+            # dati_storici['Date'] = dati_storici.index
+            
+            # colonna_da_spostare = dati_storici.pop('Date')
+            
+            # dati_storici.insert(0,'Date',colonna_da_spostare)
+            
+            # dati_storici['Date'] = dati_storici['Date'].dt.date
+            
+            # dati_storici = dati_storici.reset_index(drop=True)
+            
+            
+            # #dati_storici = dati_storici.reset_index()
+            # #dati_storici['Data'] = dati_storici['Date'].dt.date
+            # #dati_storici.drop('Date',inplace=True,axis=1)
+            # #dati_storici.rename(columns={'Data':'Date'},inplace=True)
+            # #colonna_da_spostare = dati_storici.pop('Date')
+            # #dati_storici.insert(0,'Date',colonna_da_spostare)
+            
+            # splits_format = formatta_splits(dati_storici)
+            # print('qui gli splits formattati')
+            # print(splits_format)
+            
+            # # if not splits_df.empty:
+            # #     splits_df = splits_df.sort_index()
+            # #     splits_df.index = pd.to_datetime(splits_df.index).date
+            # #     splits_df['split_factor'] = splits_df['split_factor'].apply(lambda x: f'1/{int(1/x)}' \
+            # #                                             if x<1 else f'{x:.1f}/1'.replace('.',','))
+            
+            
+            # #print(dati_storici[:10])    
                 
             
-            
-            
-            
-            
-            # APPORTO dei CORRETTIVI al DF dati_storici ORIGINALE e creo un DF splits_format per VISUALIZZARE gli SPLITS
-            
-            
-            dati_storici['Date'] = dati_storici.index
-            
-            colonna_da_spostare = dati_storici.pop('Date')
-            
-            dati_storici.insert(0,'Date',colonna_da_spostare)
-            
-            dati_storici = dati_storici.reset_index(drop=True)
-            
-            
-            #dati_storici = dati_storici.reset_index()
-            #dati_storici['Data'] = dati_storici['Date'].dt.date
-            #dati_storici.drop('Date',inplace=True,axis=1)
-            #dati_storici.rename(columns={'Data':'Date'},inplace=True)
-            #colonna_da_spostare = dati_storici.pop('Date')
-            #dati_storici.insert(0,'Date',colonna_da_spostare)
-            
-            splits_format = formatta_splits(dati_storici)
-            print('qui gli splits formattati')
-            print(splits_format)
-            
-            # if not splits_df.empty:
-            #     splits_df = splits_df.sort_index()
-            #     splits_df.index = pd.to_datetime(splits_df.index).date
-            #     splits_df['split_factor'] = splits_df['split_factor'].apply(lambda x: f'1/{int(1/x)}' \
-            #                                             if x<1 else f'{x:.1f}/1'.replace('.',','))
-            
-            
-            #print(dati_storici[:10])    
-                
-            
-            return dati_storici,splits_format
+            # return dati_storici,splits_format
        
         
         
         
                
         
-        else:
+    #     else:
             
-            splits_df = pd.DataFrame()
+    #         splits_df = pd.DataFrame()
             
-            if dati_storici.empty:
-                st.write('Nonexistent or delisted title')
-                return dati_storici,splits_df
+    #         if dati_storici.empty:
+    #             st.write('Nonexistent or delisted title')
+    #             return dati_storici,splits_df
         
-            if len(dati_storici.columns)==8:
-                st.write(f"{nome_ticker.upper()} it's not a stock")
-                dati_storici = pd.DataFrame()
-                return dati_storici,splits_df
+    #         if len(dati_storici.columns)==8:
+    #             st.write(f"{nome_ticker.upper()} it's not a stock")
+    #             dati_storici = pd.DataFrame()
+    #             return dati_storici,splits_df
             
             
             
             
             
         
-    except:
+    # except:
         
-        st.write('Yfinance server busy at the moment - try again')
-        return dati_storici,splits_format
+    #     st.write('Yfinance server busy at the moment - try again')
+    #     return dati_storici,splits_format
 
 #%%
 
@@ -700,7 +792,8 @@ def ricerca_gaps(nome_ticker,dati_storici,gap_perc_A,gap_perc_B,volume,prezzo_A,
     global gaps
     
     gaps = dati_storici.iloc[:,[0,1,2,3,4,5,8,9,10,-1,6]].copy()
-    gaps['Date'] = gaps['Date'].dt.date
+    
+    
     
     # rettifico al valore originale i dati di ogni riga del df gaps:
     
@@ -764,8 +857,6 @@ def ricerca_gaps(nome_ticker,dati_storici,gap_perc_A,gap_perc_B,volume,prezzo_A,
     
         display_gaps = gaps.copy()
             
-        #display_gaps['Date'] = display_gaps['Date'].dt.date
-        
         display_gaps['Volume'] = display_gaps.apply(lambda x: f"{x['Volume']:,.0f}".replace(',','.'),axis=1)
             
         display_gaps = display_gaps.round(2)
@@ -901,7 +992,10 @@ def visual_gap(nome_ticker,n_gap,dati_storici_ADJ):
     
     # Layout
     fig.update_layout(
-    title=f"          <b>{nome_ticker.upper()}</b> -  Grafico Gap del  {gaps.iloc[n_gap, 0]}",
+        
+    title=f"          <b>{nome_ticker.upper()}</b> -  Grafico Gap del    {gaps.iloc[n_gap, 0]}",
+    
+    
     yaxis_title="Prezzo",
     xaxis_rangeslider={'thickness': 0.08, 'visible': True},
     template="plotly_white",
