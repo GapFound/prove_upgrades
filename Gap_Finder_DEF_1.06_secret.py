@@ -307,6 +307,7 @@ def stock_split(nome_ticker,cache_file,FMP_api_key):
 
 def fondamentali_func(nome_ticker):
     
+    fond_df = nationality = exchange = sector = industry = website = None
     
     market_cap = 'M.Cap'
     outstanding = 'Outstand.'
@@ -377,6 +378,8 @@ def fondamentali_func(nome_ticker):
         
    
     # fondamentali da finviz
+    
+    finvitz_data = None
     
     tentativi = 1
     while tentativi < 5:
@@ -549,8 +552,8 @@ def datagathering_func(nome_ticker):
             # DA QUI cerco sul FMP gli splits del ticker selezionato
             print(f'provo a prendere i dati splits di {nome_ticker} da FMP')
                 
-            #FMP_api_key = st.secrets["FMP_api_key"]
-            FMP_api_key = 'nopfSumXNz9cfBYNUweN06wZvl7nEPch'
+            FMP_api_key = st.secrets["FMP_api_key"]
+            #FMP_api_key = 'nopfSumXNz9cfBYNUweN06wZvl7nEPch'
             splits_df = stock_split(nome_ticker,cache_file,FMP_api_key)
                 
                    
@@ -596,8 +599,8 @@ def datagathering_func(nome_ticker):
             print(f'provo a prendere i dati daily di {nome_ticker} da AlphaVantage')
               
               
-            #ALPHA_api_key = st.secrets["ALPHA_api_key"]
-            ALPHA_api_key = 'KQ3M16DWT70EC0KY' # GapFinder 
+            ALPHA_api_key = st.secrets["ALPHA_api_key"]
+            #ALPHA_api_key = 'KQ3M16DWT70EC0KY' # GapFinder 
             
             symbol = nome_ticker.upper()
             function = 'TIME_SERIES_DAILY'
@@ -1182,7 +1185,7 @@ with col1:
           
         
     with st.form(key=f'GAPs_Finder'):
-            nome_ticker = st.text_input('**GAPs Finder v 1.06mx**',placeholder='Enter the Ticker').strip()
+            nome_ticker = st.text_input('**GAPsFinder v 1.06mx**',placeholder='Enter the Ticker').strip()
             bottone_ricerca = st.form_submit_button('ricerca GAPs')
          
     
