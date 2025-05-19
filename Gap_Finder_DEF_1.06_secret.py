@@ -549,8 +549,8 @@ def datagathering_func(nome_ticker):
             # DA QUI cerco sul FMP gli splits del ticker selezionato
             print(f'provo a prendere i dati splits di {nome_ticker} da FMP')
                 
-            FMP_api_key = st.secrets["FMP_api_key"]
-            #FMP_api_key = 'nopfSumXNz9cfBYNUweN06wZvl7nEPch'
+            #FMP_api_key = st.secrets["FMP_api_key"]
+            FMP_api_key = 'nopfSumXNz9cfBYNUweN06wZvl7nEPch'
             splits_df = stock_split(nome_ticker,cache_file,FMP_api_key)
                 
                    
@@ -597,7 +597,8 @@ def datagathering_func(nome_ticker):
               
               
             #ALPHA_api_key = st.secrets["ALPHA_api_key"]
-            ALPHA_api_key = 'KQ3M16DWT70EC0KY' # mia personale
+            ALPHA_api_key = 'KQ3M16DWT70EC0KY' # GapFinder 
+            
             symbol = nome_ticker.upper()
             function = 'TIME_SERIES_DAILY'
             outputsize = 'full'
