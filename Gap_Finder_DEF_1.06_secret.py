@@ -567,7 +567,7 @@ def datagathering_func(nome_ticker):
             
         try:
               
-            ticker = yf.Ticker(nome_ticker.upper())   
+            ticker = uf.Ticker(nome_ticker.upper())   
             dati_storici = ticker.history(period="max")  # dati periodo massimo disponibile
             
             if not dati_storici.empty:
