@@ -643,9 +643,9 @@ def datagathering_func(nome_ticker):
             
             
             
-        # st.write(20*'*')
-        # st.write(f"il provider è: {provider}")
-        # st.write(20*'*')    
+        st.write(20*'*')
+        st.write(f"il provider è: {provider}")
+        st.write(20*'*')    
         
         #dati_storici.index = pd.to_datetime(dati_storici.index).normalize()
             
