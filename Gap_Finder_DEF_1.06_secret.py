@@ -596,8 +596,8 @@ def datagathering_func(nome_ticker):
             print(f'provo a prendere i dati daily di {nome_ticker} da AlphaVantage')
               
               
-            ALPHA_api_key = st.secrets["ALPHA_api_key"]
-            #ALPHA_api_key = 'KQ3M16DWT70EC0KY' # mia personale
+            #ALPHA_api_key = st.secrets["ALPHA_api_key"]
+            ALPHA_api_key = 'KQ3M16DWT70EC0KY' # mia personale
             symbol = nome_ticker.upper()
             function = 'TIME_SERIES_DAILY'
             outputsize = 'full'
