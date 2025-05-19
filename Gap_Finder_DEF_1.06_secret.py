@@ -574,9 +574,9 @@ def datagathering_func(nome_ticker):
                 
                 provider = 'yfinance'
 
-                st.write(20*'*')
-                st.write(f"il provider è: {provider}")
-                st.write(20*'*')    
+                #st.write(20*'*')
+                #st.write(f"il provider è: {provider}")
+                #st.write(20*'*')    
                
                 dati_storici.index = dati_storici.index.tz_localize(None)
                 
@@ -599,9 +599,9 @@ def datagathering_func(nome_ticker):
             
             provider = 'alphavantage'
 
-            st.write(20*'*')
-            st.write(f"il provider è: {provider}")
-            st.write(20*'*')    
+            #st.write(20*'*')
+            #st.write(f"il provider è: {provider}")
+            #st.write(20*'*')    
             
             # DA QUI cerco su AlphaVantage i dati daily del ticker selezionato
             print(f'provo a prendere i dati daily di {nome_ticker} da AlphaVantage')
