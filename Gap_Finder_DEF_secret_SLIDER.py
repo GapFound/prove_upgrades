@@ -58,29 +58,45 @@ def render_table_with_slider(
     df,
     min_rows: int = 6,
     max_rows: int = 24,
-    row_px: int = 28,
-    header_px: int = 36,
-    padding_px: int = 16,
+    row_px: int = 26,      # ↓ righe più compatte (prima 28)
+    header_px: int = 34,   # ↓ header più compatto (prima 36)
+    padding_px: int = 14,  # ↓ padding verticale contenitore
     key: str = "tbl",
     escape: bool = True,
 ):
-    html_table = df.to_html(border=0, classes="gf-table", index=False, escape=escape)
+    # indice 1-based più stretto
+    try:
+        df2 = df.copy()
+        df2.index = range(1, len(df2) + 1)
+        df2.index.name = ""
+    except Exception:
+        df2 = df
 
-    rows = int(df.shape[0])
+    html_table = df2.to_html(border=0, classes="gf-table", index=True, escape=escape)
+
+    rows = int(df2.shape[0])
     target_rows = max(min_rows, min(rows, max_rows))
     scroller_h = header_px + row_px * target_rows + padding_px
-    component_h = scroller_h + 40  # spazio slider
+    component_h = scroller_h + 36  # spazio slider
 
     html = f"""
-    <div id="gf-wrap-{key}" style="position:relative; z-index: 2147483000; width:100%; overflow:visible; font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
-      <!-- Scroller: nasconde la H-scrollbar nativa, lascia la V -->
-      <div id="gf-scroller-{key}" style="overflow-y:auto; overflow-x:hidden; border:1px solid #ddd; height:{scroller_h}px;">
+    <div id="gf-wrap-{key}" style="
+      position:relative; z-index:2147483000;
+      width:100%; max-width:100%;
+      box-sizing:border-box; overflow:visible;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
+      
+      <div id="gf-scroller-{key}" style="
+        overflow-y:auto; overflow-x:auto;
+        border:1px solid #ddd; height:{scroller_h}px;
+        width:100%; max-width:100%; box-sizing:border-box;
+        padding-bottom:2px; padding-right:2px;">
         <div id="gf-content-{key}">
           {html_table}
         </div>
       </div>
 
-      <!-- Slider custom, PIU' IN ALTO -->
+      <!-- Slider -->
       <div id="gf-slider-wrap-{key}" class="gf-slider">
         <div class="gf-track"></div>
         <div id="gf-fill-{key}" class="gf-fill"></div>
@@ -90,41 +106,44 @@ def render_table_with_slider(
     </div>
 
     <style>
-      /* Tabella */
-      #gf-wrap-{key} table {{ border-collapse: collapse; width: max-content; font-size:13px; }}
-      #gf-wrap-{key} th, #gf-wrap-{key} td {{ padding:6px 8px; border-bottom:1px solid #eee; white-space:nowrap; }}
-      #gf-wrap-{key} thead th {{ position: sticky; top: 0; background:#fafafa; z-index:1; }}
+      /* Tabella più compatta e che non sfora la colonna */
+      #gf-wrap-{key} table {{
+        border-collapse: separate; border-spacing:0;
+        width: max-content;
+        max-width: calc(100% - 4px);     /* evita il taglio a destra */
+        font-size:12.5px;                  /* ↓ font */
+      }}
+      #gf-wrap-{key} th, #gf-wrap-{key} td {{
+        padding:4.5px 6.5px;                 /* ↓ padding */
+        white-space:nowrap;
+        border-bottom:1px solid #eee;    /* righe */
+        border-right:1px solid #eee;     /* colonne (linee sottili) */
+      }}
+      #gf-wrap-{key} th:last-child, #gf-wrap-{key} td:last-child {{ border-right:none; }}
+      #gf-wrap-{key} thead th {{
+        position: sticky; top: 0;
+        background:#fafafa; z-index:1;
+      }}
 
-      /* Nascondi solo scrollbar orizzontale (WebKit) */
+      /* Colonna indice ancora più stretta */
+      #gf-wrap-{key} thead th:first-child,
+      #gf-wrap-{key} tbody td:first-child {{
+        text-align:center;
+        width:32px; min-width:32px; max-width:32px;
+        color:#444;
+      }}
+
+      /* Nascondi SOLO la scrollbar orizzontale nativa in WebKit (rimane lo scroll via slider) */
       #gf-scroller-{key}::-webkit-scrollbar:horizontal {{ height:0px; display:none; }}
+      #gf-scroller-{key} {{ scrollbar-gutter: stable both-edges; }}
 
-      /* Slider: alzato e con extra spazio verticale, niente tagli */
-      .gf-slider {{ position: relative; height: 34px; margin-top: 2px; z-index: 2147483200; overflow: visible; }}
+      /* Slider (resta identico) */
+      .gf-slider {{ position:relative; height:34px; margin-top:2px; z-index:2147483200; overflow:visible; }}
       .gf-track  {{ position:absolute; left:10px; right:10px; top:40%; height:3px; background:#e5e7eb; transform:translateY(-50%); border-radius:2px; z-index:1; }}
-      .gf-fill   {{ position:absolute; left:10px; top:40%; height:3px; background:#d00;    transform:translateY(-50%); border-radius:2px; width:0px; z-index:2; }}
-
-      /* Handle piccolo, sempre SOPRA TUTTO */
-      .gf-handle {{
-        position:absolute; top:40%;
-        width:12px; height:12px;
-        background:#d00;
-        border:2px solid #fff;
-        border-radius:50%;
-        transform:translate(-50%,-50%);
-        left:10px;
-        box-shadow:0 0 0 1px rgba(0,0,0,.15);
-        cursor:grab;
-        z-index: 2147483400;
-      }}
+      .gf-fill   {{ position:absolute; left:10px; top:40%; height:3px; background:#d00; transform:translateY(-50%); border-radius:2px; width:0px; z-index:2; }}
+      .gf-handle {{ position:absolute; top:40%; width:12px; height:12px; background:#d00; border:2px solid #fff; border-radius:50%; transform:translate(-50%,-50%); left:10px; box-shadow:0 0 0 1px rgba(0,0,0,.15); cursor:grab; z-index:2147483400; }}
       .gf-handle:active {{ cursor:grabbing; }}
-
-      /* Input fantasma per drag/click, sotto l'handle ma sopra tutto il resto */
-      .gf-range-ghost {{
-        position:absolute; left:0; right:0; top:0; bottom:0;
-        width:100%; height:100%;
-        opacity:0; cursor:ew-resize;
-        z-index: 2147483300;
-      }}
+      .gf-range-ghost {{ position:absolute; left:0; right:0; top:0; bottom:0; width:100%; height:100%; opacity:0; cursor:ew-resize; z-index:2147483300; }}
     </style>
 
     <script>
@@ -134,16 +153,10 @@ def render_table_with_slider(
       const fillEl    = document.getElementById("gf-fill-{key}");
       const handleEl  = document.getElementById("gf-handle-{key}");
       const sliderBox = document.getElementById("gf-slider-wrap-{key}");
-
       const PADDING = 10;
 
-      function maxScrollX() {{
-        return Math.max(0, content.scrollWidth - scroller.clientWidth);
-      }}
-
-      function usableWidth() {{
-        return Math.max(0, sliderBox.clientWidth - 2*PADDING);
-      }}
+      function maxScrollX() {{ return Math.max(0, content.scrollWidth - scroller.clientWidth); }}
+      function usableWidth() {{ return Math.max(0, sliderBox.clientWidth - 2*PADDING); }}
 
       function applyPct(pct) {{
         const W = usableWidth();
@@ -154,11 +167,7 @@ def render_table_with_slider(
 
       function syncSliderFromScroll() {{
         const m = maxScrollX();
-        if (m <= 0) {{
-          rangeEl.disabled = true;
-          applyPct(0);
-          return;
-        }}
+        if (m <= 0) {{ rangeEl.disabled = true; applyPct(0); return; }}
         rangeEl.disabled = false;
         const pct = (scroller.scrollLeft / m) * 100;
         rangeEl.value = Math.round((pct/100) * 1000);
@@ -194,9 +203,7 @@ def render_table_with_slider(
       setTimeout(syncSliderFromScroll, 120);
     </script>
     """
-
     components.html(html, height=component_h, scrolling=False)
-
 
 
 
