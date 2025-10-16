@@ -113,7 +113,7 @@ def render_table_with_slider(
         font-size:11.5px;                  /* ↓ font */
       }}
       #gf-wrap-{key} th, #gf-wrap-{key} td {{
-        padding:4px 4.8px;                 /* ↓ padding */
+        padding:6px 4.6px;                 /* ↓ padding */
         white-space:nowrap;
         border-bottom:1px solid #eee;    /* righe */
         border-right:1px solid #eee;     /* colonne (linee sottili) */
