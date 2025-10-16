@@ -57,13 +57,13 @@ def render_table_with_slider(
     df,
     min_rows: int = 6,
     max_rows: int = 24,
-    row_px: int = 26,      # ↓ righe più compatte (prima 28)
-    header_px: int = 34,   # ↓ header più compatto (prima 36)
-    padding_px: int = 14,  # ↓ padding verticale contenitore
+    row_px: int = 26,
+    header_px: int = 34,
+    padding_px: int = 14,
     key: str = "tbl",
     escape: bool = True,
 ):
-    # indice 1-based più stretto
+    # indice 1-based
     try:
         df2 = df.copy()
         df2.index = range(1, len(df2) + 1)
@@ -76,7 +76,7 @@ def render_table_with_slider(
     rows = int(df2.shape[0])
     target_rows = max(min_rows, min(rows, max_rows))
     scroller_h = header_px + row_px * target_rows + padding_px
-    component_h = scroller_h + 36  # spazio slider
+    component_h = scroller_h + 36
 
     html = f"""
     <div id="gf-wrap-{key}" style="
@@ -84,9 +84,10 @@ def render_table_with_slider(
       width:100%; max-width:100%;
       box-sizing:border-box; overflow:visible;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
-      
+
+      <!-- IMPORTANT: overflow-x:hidden per eliminare la barra nativa -->
       <div id="gf-scroller-{key}" style="
-        overflow-y:auto; overflow-x:auto;
+        overflow-y:auto; overflow-x:hidden;
         border:1px solid #ddd; height:{scroller_h}px;
         width:100%; max-width:100%; box-sizing:border-box;
         padding-bottom:2px; padding-right:2px;">
@@ -105,18 +106,18 @@ def render_table_with_slider(
     </div>
 
     <style>
-      /* Tabella più compatta e che non sfora la colonna */
+      /* Tabella */
       #gf-wrap-{key} table {{
         border-collapse: separate; border-spacing:0;
         width: max-content;
-        max-width: calc(100% - 4px);     /* evita il taglio a destra */
-        font-size:11.5px;                  /* ↓ font */
+        max-width: calc(100% - 4px);
+        font-size:11.5px;
       }}
       #gf-wrap-{key} th, #gf-wrap-{key} td {{
-        padding:6px 4.6px;                 /* ↓ padding */
+        padding:6px 4.6px;
         white-space:nowrap;
-        border-bottom:1px solid #eee;    /* righe */
-        border-right:1px solid #eee;     /* colonne (linee sottili) */
+        border-bottom:1px solid #eee;
+        border-right:1px solid #eee;
       }}
       #gf-wrap-{key} th:last-child, #gf-wrap-{key} td:last-child {{ border-right:none; }}
       #gf-wrap-{key} thead th {{
@@ -124,7 +125,7 @@ def render_table_with_slider(
         background:#fafafa; z-index:1;
       }}
 
-      /* Colonna indice ancora più stretta */
+      /* Colonna indice (FIX: max-width corretto) */
       #gf-wrap-{key} thead th:first-child,
       #gf-wrap-{key} tbody td:first-child {{
         text-align:center;
@@ -132,11 +133,14 @@ def render_table_with_slider(
         color:#444;
       }}
 
-      /* Nascondi SOLO la scrollbar orizzontale nativa in WebKit (rimane lo scroll via slider) */
-      #gf-scroller-{key}::-webkit-scrollbar:horizontal {{ height:0px; display:none; }}
-      #gf-scroller-{key} {{ scrollbar-gutter: stable both-edges; }}
+      /* Nascondi barra H nativa ovunque */
+      #gf-scroller-{key} {{
+        -ms-overflow-style: none;        /* IE/Edge legacy */
+        scrollbar-width: none;           /* Firefox */
+      }}
+      #gf-scroller-{key}::-webkit-scrollbar:horizontal {{ height:0px; display:none; }}  /* WebKit */
 
-      /* Slider (resta identico) */
+      /* Slider custom */
       .gf-slider {{ position:relative; height:34px; margin-top:2px; z-index:2147483200; overflow:visible; }}
       .gf-track  {{ position:absolute; left:10px; right:10px; top:40%; height:3px; background:#e5e7eb; transform:translateY(-50%); border-radius:2px; z-index:1; }}
       .gf-fill   {{ position:absolute; left:10px; top:40%; height:3px; background:#d00; transform:translateY(-50%); border-radius:2px; width:0px; z-index:2; }}
@@ -176,7 +180,7 @@ def render_table_with_slider(
       function syncScrollFromSlider() {{
         const m = maxScrollX();
         const pct = (rangeEl.value / 1000) * 100;
-        scroller.scrollLeft = (pct/100) * m;
+        scroller.scrollLeft = (pct/100) * m;   /* funziona anche con overflow-x:hidden */
         applyPct(pct);
       }}
 
@@ -203,6 +207,8 @@ def render_table_with_slider(
     </script>
     """
     components.html(html, height=component_h, scrolling=False)
+    
+#------------------------
 
 
 
