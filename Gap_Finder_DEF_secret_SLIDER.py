@@ -53,7 +53,6 @@ import os
 
 # per prima inserisco la funzione che mette sempre in evidenza la barra di scroll delle tabelle
 
-
 def render_table_with_slider(
     df,
     min_rows: int = 6,
@@ -111,10 +110,10 @@ def render_table_with_slider(
         border-collapse: separate; border-spacing:0;
         width: max-content;
         max-width: calc(100% - 4px);     /* evita il taglio a destra */
-        font-size:12.5px;                  /* ↓ font */
+        font-size:11.5px;                  /* ↓ font */
       }}
       #gf-wrap-{key} th, #gf-wrap-{key} td {{
-        padding:4.5px 6.5px;                 /* ↓ padding */
+        padding:4px 4.8px;                 /* ↓ padding */
         white-space:nowrap;
         border-bottom:1px solid #eee;    /* righe */
         border-right:1px solid #eee;     /* colonne (linee sottili) */
@@ -129,7 +128,7 @@ def render_table_with_slider(
       #gf-wrap-{key} thead th:first-child,
       #gf-wrap-{key} tbody td:first-child {{
         text-align:center;
-        width:32px; min-width:32px; max-width:32px;
+        width:26px; min-width:26px; max-width:26px;
         color:#444;
       }}
 
@@ -204,13 +203,6 @@ def render_table_with_slider(
     </script>
     """
     components.html(html, height=component_h, scrolling=False)
-
-
-
-
-#%%
-
-
 
 
 
