@@ -21,6 +21,7 @@ import yfinance as yf
 from finvizfinance.quote import finvizfinance
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pickle
 import os
 import sys
@@ -30,6 +31,163 @@ session = requests.Session()
 session.headers.update({
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 })
+
+#%%
+
+# FUNZIONE PERSONALIZZATA PER LA BARRA DI SCROLL ORIZZONTALE SULLE TABELLE
+def render_table_with_slider(
+    df,
+    min_rows: int = 6,
+    max_rows: int = 24,
+    row_px: int = 26,
+    header_px: int = 34,
+    padding_px: int = 14,
+    key: str = "tbl",
+    escape: bool = True,
+):
+    try:
+        df2 = df.copy()
+        df2.index = range(1, len(df2) + 1)
+        df2.index.name = ""
+    except Exception:
+        df2 = df
+
+    html_table = df2.to_html(border=0, classes="gf-table", index=True, escape=escape)
+
+    rows = int(df2.shape[0])
+    target_rows = max(min_rows, min(rows, max_rows))
+    scroller_h = header_px + row_px * target_rows + padding_px
+    component_h = scroller_h + 36
+
+    html = f"""
+    <div id="gf-wrap-{key}" style="
+      position:relative; z-index:2147483000;
+      width:100%; max-width:100%;
+      box-sizing:border-box; overflow:visible;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
+
+      <!-- IMPORTANT: overflow-x:hidden per eliminare la barra nativa -->
+      <div id="gf-scroller-{key}" style="
+        overflow-y:auto; overflow-x:hidden;
+        border:1px solid #ddd; height:{scroller_h}px;
+        width:100%; max-width:100%; box-sizing:border-box;
+        padding-bottom:2px; padding-right:2px;">
+        <div id="gf-content-{key}">
+          {html_table}
+        </div>
+      </div>
+
+      <!-- Slider -->
+      <div id="gf-slider-wrap-{key}" class="gf-slider">
+        <div class="gf-track"></div>
+        <div id="gf-fill-{key}" class="gf-fill"></div>
+        <div id="gf-handle-{key}" class="gf-handle"></div>
+        <input id="gf-range-{key}" class="gf-range-ghost" type="range" min="0" max="1000" value="0">
+      </div>
+    </div>
+
+    <style>
+      /* Tabella */
+      #gf-wrap-{key} table {{
+        border-collapse: separate; border-spacing:0;
+        width: max-content;
+        max-width: calc(100% - 4px);
+        font-size:11.5px;
+      }}
+      #gf-wrap-{key} th, #gf-wrap-{key} td {{
+        padding:6px 4.6px;
+        white-space:nowrap;
+        border-bottom:1px solid #eee;
+        border-right:1px solid #eee;
+      }}
+      #gf-wrap-{key} th:last-child, #gf-wrap-{key} td:last-child {{ border-right:none; }}
+      #gf-wrap-{key} thead th {{
+        position: sticky; top: 0;
+        background:#fafafa; z-index:1;
+      }}
+
+      /* Colonna indice (FIX: max-width corretto) */
+      #gf-wrap-{key} thead th:first-child,
+      #gf-wrap-{key} tbody td:first-child {{
+        text-align:center;
+        width:26px; min-width:26px; max-width:26px;
+        color:#444;
+      }}
+
+      /* Nascondi barra H nativa ovunque */
+      #gf-scroller-{key} {{
+        -ms-overflow-style: none;        /* IE/Edge legacy */
+        scrollbar-width: none;           /* Firefox */
+      }}
+      #gf-scroller-{key}::-webkit-scrollbar:horizontal {{ height:0px; display:none; }}  /* WebKit */
+
+      /* Slider custom */
+      .gf-slider {{ position:relative; height:34px; margin-top:2px; z-index:2147483200; overflow:visible; }}
+      .gf-track  {{ position:absolute; left:10px; right:10px; top:40%; height:3px; background:#e5e7eb; transform:translateY(-50%); border-radius:2px; z-index:1; }}
+      .gf-fill   {{ position:absolute; left:10px; top:40%; height:3px; background:#d00; transform:translateY(-50%); border-radius:2px; width:0px; z-index:2; }}
+      .gf-handle {{ position:absolute; top:40%; width:12px; height:12px; background:#d00; border:2px solid #fff; border-radius:50%; transform:translate(-50%,-50%); left:10px; box-shadow:0 0 0 1px rgba(0,0,0,.15); cursor:grab; z-index:2147483400; }}
+      .gf-handle:active {{ cursor:grabbing; }}
+      .gf-range-ghost {{ position:absolute; left:0; right:0; top:0; bottom:0; width:100%; height:100%; opacity:0; cursor:ew-resize; z-index:2147483300; }}
+    </style>
+
+    <script>
+      const scroller  = document.getElementById("gf-scroller-{key}");
+      const content   = document.getElementById("gf-content-{key}");
+      const rangeEl   = document.getElementById("gf-range-{key}");
+      const fillEl    = document.getElementById("gf-fill-{key}");
+      const handleEl  = document.getElementById("gf-handle-{key}");
+      const sliderBox = document.getElementById("gf-slider-wrap-{key}");
+      const PADDING = 10;
+
+      function maxScrollX() {{ return Math.max(0, content.scrollWidth - scroller.clientWidth); }}
+      function usableWidth() {{ return Math.max(0, sliderBox.clientWidth - 2*PADDING); }}
+
+      function applyPct(pct) {{
+        const W = usableWidth();
+        const x = PADDING + (pct/100) * W;
+        fillEl.style.width = (x - PADDING) + "px";
+        handleEl.style.left = x + "px";
+      }}
+
+      function syncSliderFromScroll() {{
+        const m = maxScrollX();
+        if (m <= 0) {{ rangeEl.disabled = true; applyPct(0); return; }}
+        rangeEl.disabled = false;
+        const pct = (scroller.scrollLeft / m) * 100;
+        rangeEl.value = Math.round((pct/100) * 1000);
+        applyPct(pct);
+      }}
+
+      function syncScrollFromSlider() {{
+        const m = maxScrollX();
+        const pct = (rangeEl.value / 1000) * 100;
+        scroller.scrollLeft = (pct/100) * m;   
+        applyPct(pct);
+      }}
+
+      let dragging = false;
+      handleEl.addEventListener("mousedown", () => dragging = true);
+      window.addEventListener("mouseup",   () => dragging = false);
+      window.addEventListener("mousemove", (e) => {{
+        if (!dragging) return;
+        const rect = sliderBox.getBoundingClientRect();
+        let x = Math.min(Math.max(e.clientX - rect.left, PADDING), rect.width - PADDING);
+        const pct = ((x - PADDING) / (rect.width - 2*PADDING)) * 100;
+        rangeEl.value = Math.round((pct/100) * 1000);
+        syncScrollFromSlider();
+      }});
+
+      scroller.addEventListener("scroll", syncSliderFromScroll);
+      rangeEl.addEventListener("input",  syncScrollFromSlider);
+      rangeEl.addEventListener("change", syncScrollFromSlider);
+
+      new ResizeObserver(syncSliderFromScroll).observe(content);
+      new ResizeObserver(syncSliderFromScroll).observe(sliderBox);
+      window.addEventListener("load", syncSliderFromScroll);
+      setTimeout(syncSliderFromScroll, 120);
+    </script>
+    """
+    components.html(html, height=component_h, scrolling=False)
 
 #%%
 
@@ -716,7 +874,7 @@ with col1:
             else:
                 ticker_html = f"{nome_ticker.upper()}"
 
-            # ABBIAMO CAMBIATO DA ST.MARKDOWN A ST.HTML PER EVITARE I CONFLITTI DI COGNIZIONE
+            # USATO ST.HTML CHE RISOLVE I BLOCCHI GRIGI
             st.html(f"""
                 <div style="font-size: 22px; font-weight: bold; margin-bottom: 2px;">
                     {ticker_html}
@@ -740,13 +898,15 @@ with col1:
                 st.markdown("<div style='font-size: 14px;'> <b>Splits / Reverse Splits</b> </div>", unsafe_allow_html=True)
                 st.write("")
     
+                # ACCUMULATORE PER EVITARE GLI SPAZI VERTICALI NEGLI SPLITS
+                splits_html = ""
                 for a, b in st.session_state['dati_split'].iterrows():
-                     # USATO ST.HTML ANCHE QUI
-                     st.html(f"""
-                                <div style="font-size: 13px;">
+                     splits_html += f"""
+                                <div style="font-size: 13px; margin-bottom: 4px;">
                                     {a} <b>&nbsp;&nbsp;--&nbsp;&nbsp;</b> {b['split_factor']}
                                 </div>
-                            """)
+                            """
+                st.html(splits_html)
 
 with col2:
     st.markdown(
@@ -791,9 +951,9 @@ with col2:
            st.write(""); st.write("")
            
            if not v_gaps.empty:
-               st.table(v_gaps)
+               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER CON SCROLLER ORIZZONTALE SULLE TABELLE
+               render_table_with_slider(v_gaps, key="gaps")
            else:
-               # ABBIAMO AGGIORNATO CON ST.HTML
                st.html(f"""
                     <div style="text-align: center; font-size: 14.5px;">
                         <b>{nome_ticker.upper()}</b> non ha giornate rispondenti ai parametri settati
@@ -804,7 +964,6 @@ with col2:
           
            with col2_5: 
                    st.write(""); st.write(""); st.write(""); st.write(""); st.write("")
-                   # ABBIAMO AGGIORNATO CON ST.HTML
                    st.html(f"""
                        <div style="text-align:center; font-size: 14px;">
                            <b>news:</b> <br/> <br/>
@@ -812,6 +971,8 @@ with col2:
                    """)
                                    
                    if isinstance(st.session_state['news'], pd.DataFrame):
+                           # ACCUMULATORE PER EVITARE GLI SPAZI VERTICALI NELLE NEWS
+                           news_html = ""
                            for a, b in st.session_state['news'].iterrows():
                                ora = datetime.now().hour
                                
@@ -828,23 +989,23 @@ with col2:
                                     
                                data_da_stampa = formatted_date.strftime("%Y-%m-%d | h %H:%M")    
                         
-                               with col2_5: 
-                                    link = b['Link']
-                                    if not link.startswith('http'):
-                                        link = "https://finviz.com/" + b['Link']
-                                            
-                                    # USATO ST.HTML CHE RISOLVE ALL'ORIGINE I BOX GRIGI
-                                    st.html(f"""
-                                        <div style="text-align:left; font-size: 13px;">
-                                            <strong style="color: red;">{data_da_stampa}</strong>&nbsp;
-                                            <a href="{link}" style="text-decoration: none; color: inherit;">
-                                                {b['Title']}
-                                            </a>
-                                        </div>
-                                    """)
+                               link = b['Link']
+                               if not link.startswith('http'):
+                                    link = "https://finviz.com/" + b['Link']
+                                        
+                               news_html += f"""
+                                    <div style="text-align:left; font-size: 13px; margin-bottom: 6px; line-height: 1.3;">
+                                        <strong style="color: red;">{data_da_stampa}</strong>&nbsp;
+                                        <a href="{link}" style="text-decoration: none; color: inherit;">
+                                            {b['Title']}
+                                        </a>
+                                    </div>
+                               """
+                           
+                           # STAMPATO UNICAMENTE UNA VOLTA FUORI DAL LOOP
+                           st.html(news_html)
 
                    if isinstance(st.session_state['news'], str):
-                           # USATO ST.HTML
                            st.html(f"""
                                <div style="text-align:center; font-size: 14px;">
                                    {st.session_state['news']}
@@ -862,7 +1023,6 @@ with col2:
                         try:
                             visual_gap(nome_ticker, (n_gap-1), st.session_state['dati_storici_ADJ'])
                         except:
-                            # USATO ST.HTML
                             st.html(f"""
                                  <div style="text-align: center; font-size: 15px;">
                                      grafico non disponibile
