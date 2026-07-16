@@ -6,6 +6,7 @@ Created on Thu Dec  5 11:34:33 2024
 @author: ninni
 """
 
+
 import numpy as np
 import pandas as pd
 import requests
@@ -33,6 +34,55 @@ session.headers.update({
 })
 
 #%%
+
+# FUNZIONE HELPER PER SCARICARE IL PROFILO AZIENDALE DA MASSIVE/POLYGON
+def fetch_polygon_profile(nome_ticker):
+    default_profile = {
+        'nationality_exchange': {'nation': " - ", 'exchange': " - "},
+        'sector_industry': {'sector': ' - ', 'industry': ' - '},
+        'website': ''
+    }
+    try:
+        # Supporta sia POLYGON_api_key che MASSIVE_api_key nei secrets
+        api_key = st.secrets.get("POLYGON_api_key", st.secrets.get("MASSIVE_api_key", ""))
+        if not api_key:
+            return default_profile
+            
+        url = f"https://api.polygon.io/v3/reference/tickers/{nome_ticker.upper()}?apiKey={api_key}"
+        res = requests.get(url).json()
+        
+        if res.get('status') == 'OK' and 'results' in res:
+            results = res['results']
+            
+            # Mappatura dei codici MIC di Exchange più comuni
+            exchange_map = {
+                "XNAS": "NASDAQ",
+                "XNYS": "NYSE",
+                "ARCX": "NYSE ARCA",
+                "BATS": "BATS",
+                "XOTC": "OTC Markets"
+            }
+            raw_exchange = results.get('primary_exchange', ' - ')
+            exchange_cleaned = exchange_map.get(raw_exchange, raw_exchange)
+            
+            # Mappatura della descrizione SIC come settore/industria ufficiale
+            sic_desc = results.get('sic_description', ' - ').title()
+            
+            return {
+                'nationality_exchange': {
+                    'nation': results.get('locale', 'US').upper(),
+                    'exchange': exchange_cleaned
+                },
+                'sector_industry': {
+                    'sector': sic_desc,
+                    'industry': sic_desc
+                },
+                'website': results.get('homepage_url', '')
+            }
+    except Exception as e:
+        print("Errore chiamata Polygon/Massive:", e)
+        
+    return default_profile
 
 # FUNZIONE PERSONALIZZATA PER LA BARRA DI SCROLL ORIZZONTALE SULLE TABELLE
 def render_table_with_slider(
@@ -332,40 +382,26 @@ def fondamentali_func(nome_ticker):
         website = ""
         fondamentali_yf = {market_cap: ' - ', outstanding: ' - ', shares_float: ' - ', insider_own: ' - ', inst_own: ' - ', short_float: ' - ' }
      
-    # 2. CONTROLLO SE ABBIAMO IL PROFILO CARICATO DA CACHE (NIENTE CHIAMATE ESTERNE SE GIA' SALVATO)
+    # Carichiamo direttamente il profilo (Settore, Exchange, Website) caricato e gestito dalla Cache in datagathering_func
     cached_profile = st.session_state.get('cached_profile', None)
     if cached_profile:
         nationality_exchange = cached_profile['nationality_exchange']
         sector_industry = cached_profile['sector_industry']
-        website = cached_profile['website'] if not website else website
+        if not website:
+            website = cached_profile['website']
     else:
-        # 3. SE NON CACHATO, PROVIAMO FINVIZ COME PRIMO TENTATIVO
         nationality_exchange = {'nation': " - ", 'exchange': " - "}
         sector_industry = {'sector': ' - ', 'industry': ' - '}
-        try:
-            stock = finvizfinance(nome_ticker)
-            finvitz_data = stock.ticker_fundament()
-            
-            def prendi_voce(voce):
-                try:
-                    return finvitz_data.get(voce, ' - ')
-                except:
-                    return ' - '
-            
-            nationality_exchange = {'nation': prendi_voce("Country"), 'exchange': prendi_voce("Exchange")}            
-            sector_industry = {'sector': prendi_voce("Sector"), 'industry': prendi_voce("Industry")}
-        except:
-            pass
         
-    fondamentali_fz = {market_cap: ' - ', outstanding: ' - ', shares_float: ' - ', insider_own: ' - ', inst_own: ' - ', short_float: ' - ' }
-    try:
-        stock = finvizfinance(nome_ticker)
-        finvitz_data = stock.ticker_fundament()
-        def prendi_voce(voce):
-            return finvitz_data.get(voce, ' - ')
-        fondamentali_fz = {market_cap: prendi_voce('Market Cap'), outstanding: prendi_voce('Shs Outstand'), shares_float: prendi_voce('Shs Float'), insider_own: prendi_voce('Insider Own'), inst_own: prendi_voce('Inst Own'), short_float: prendi_voce('Short Float')}
-    except:
-        pass
+    # Eliminiamo completamente Finviz per non avere crash o latenza. Lasciamo la colonna Fz vuota con trattini per mantenere intatta la tabella
+    fondamentali_fz = {
+        market_cap: ' - ',
+        outstanding: ' - ',   
+        shares_float: ' - ',
+        insider_own: ' - ',
+        inst_own: ' - ',
+        short_float: ' - ' 
+    }
         
     fond_fz_df = pd.DataFrame({'a': fondamentali_fz.keys(), 'Fz': fondamentali_fz.values()})
     fond_yf_df = pd.DataFrame({'a': fondamentali_yf.keys(), 'Yf': fondamentali_yf.values()})
@@ -401,7 +437,7 @@ def news_func(nome_ticker):
 
 #%%
 
-# CARICO I VALORI di PREZZO DA YFINANCE o da ALPHA_VANTAGE (E GESTIONE CACHE INTELLIGENTE DEL PROFILO FMP)
+# CARICO I VALORI di PREZZO DA YFINANCE o da ALPHA_VANTAGE (E GESTIONE LAZY-LOAD CACHE DEL PROFILO MASSIVE/POLYGON)
 
 def datagathering_func(nome_ticker):
     dati_storici = pd.DataFrame(); splits_format = pd.DataFrame(); caricato = 0; provider = "" 
@@ -419,33 +455,26 @@ def datagathering_func(nome_ticker):
               splits_format = cache_data['splits']
               provider = cache_data['provider']
               
-              # Carica il profilo precedentemente salvato in cache per consumare 0 chiamate FMP
-              st.session_state['cached_profile'] = cache_data.get('profile', None)
+              profile_data = cache_data.get('profile', None)
+              
+              # LAZY-LOAD INTELLIGENTE: Se il profilo manca nel vecchio file .pkl, lo scarichiamo una volta sola e ri-salviamo il file .pkl
+              if profile_data is None and not dati_storici.empty:
+                  print("Profilo mancante nella vecchia cache. Eseguo lazy-load da Massive/Polygon.")
+                  profile_data = fetch_polygon_profile(nome_ticker)
+                  try:
+                      cache_data['profile'] = profile_data
+                      with open(cache_file, 'wb') as out_fp:
+                          pickle.dump(cache_data, out_fp)
+                  except Exception as e:
+                      print("Errore nell'aggiornamento cache con profilo:", e)
+              
+              st.session_state['cached_profile'] = profile_data
               caricato = 1
    
     if caricato == 0:
-        # Se è un nuovo ticker, interroghiamo il profilo FMP una sola volta e lo salviamo permanentemente
-        fmp_profile = {'nationality_exchange': {'nation': " - ", 'exchange': " - "}, 'sector_industry': {'sector': ' - ', 'industry': ' - '}, 'website': ''}
-        try:
-            FMP_api_key = st.secrets["FMP_api_key"]
-            url = f"https://financialmodelingprep.com/api/v3/profile/{nome_ticker.upper()}?apikey={FMP_api_key}"
-            res = requests.get(url).json()
-            if res and len(res) > 0:
-                profile = res[0]
-                fmp_profile = {
-                    'nationality_exchange': {
-                        'nation': profile.get('country', 'US'),
-                        'exchange': profile.get('exchangeShortName', ' - ')
-                    },
-                    'sector_industry': {
-                        'sector': profile.get('sector', ' - '),
-                        'industry': profile.get('industry', ' - ')
-                    },
-                    'website': profile.get('website', '')
-                }
-        except:
-            pass
-        
+        # Ticker totalmente nuovo: scarichiamo il profilo da MASSIVE/Polygon una volta sola e lo scriviamo in cache
+        print("Nuovo Ticker. Scarico il profilo da Massive/Polygon.")
+        fmp_profile = fetch_polygon_profile(nome_ticker)
         st.session_state['cached_profile'] = fmp_profile
         
         try:     
@@ -559,7 +588,7 @@ def datagathering_func(nome_ticker):
                        'dati_storici': dati_storici, 
                        'splits': splits_format, 
                        'provider': provider,
-                       'profile': fmp_profile # Salviamo il profilo FMP nella cache locale
+                       'profile': fmp_profile 
                    }, fp)
                return dati_storici, splits_format, provider
     else:
@@ -884,7 +913,7 @@ with col1:
             else:
                 ticker_html = f"{nome_ticker.upper()}"
 
-            # USATO ST.HTML CHE RISOLVE I BLOCCHI GRIGI
+            # ST.HTML CARICA DIRETTAMENTE EXCHANGE E SETTORE DA MASSIVE/POLYGON
             st.html(f"""
                 <div style="font-size: 22px; font-weight: bold; margin-bottom: 2px;">
                     {ticker_html}
@@ -902,12 +931,9 @@ with col1:
             print(st.session_state['fondamentali'])
                    
             if not st.session_state['dati_split'].empty:
-                st.write("")
-                st.write("")
-                st.markdown("<div style='font-size: 14px;'> <b>Splits / Reverse Splits</b> </div>", unsafe_allow_html=True)
-                st.write("")
+                # Spazio verticale ridotto elegantemente tramite CSS margin-top e margin-bottom
+                st.markdown("<div style='font-size: 14px; margin-top: 15px; margin-bottom: 8px;'><b>Splits / Reverse Splits</b></div>", unsafe_allow_html=True)
     
-                # ACCUMULATORE PER EVITARE GLI SPAZI VERTICALI NEGLI SPLITS
                 splits_html = ""
                 for a, b in st.session_state['dati_split'].iterrows():
                      splits_html += f"""
@@ -960,10 +986,8 @@ with col2:
            st.write(""); st.write("")
            
            if not v_gaps.empty:
-               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER CON SCROLLER ORIZZONTALE SULLE TABELLE
                render_table_with_slider(v_gaps, key="gaps")
            else:
-               # ABBIAMO AGGIORNATO CON ST.HTML
                st.html(f"""
                     <div style="text-align: center; font-size: 14.5px;">
                         <b>{nome_ticker.upper()}</b> non ha giornate rispondenti ai parametri settati
@@ -974,7 +998,6 @@ with col2:
           
            with col2_5: 
                    st.write(""); st.write(""); st.write(""); st.write(""); st.write("")
-                   # ABBIAMO AGGIORNATO CON ST.HTML
                    st.html(f"""
                        <div style="text-align:center; font-size: 14px;">
                            <b>news:</b> <br/> <br/>
@@ -982,7 +1005,6 @@ with col2:
                    """)
                                    
                    if isinstance(st.session_state['news'], pd.DataFrame):
-                           # ACCUMULATORE PER EVITARE GLI SPAZI VERTICALI NELLE NEWS
                            news_html = ""
                            for a, b in st.session_state['news'].iterrows():
                                ora = datetime.now().hour
@@ -1004,7 +1026,6 @@ with col2:
                                if not link.startswith('http'):
                                     link = "https://finviz.com/" + b['Link']
                                         
-                               # USATO ST.HTML CHE RISOLVE ALL'ORIGINE I BOX GRIGI
                                news_html += f"""
                                     <div style="text-align:left; font-size: 13px; margin-bottom: 6px; line-height: 1.3;">
                                         <strong style="color: red;">{data_da_stampa}</strong>&nbsp;
@@ -1014,11 +1035,9 @@ with col2:
                                     </div>
                                """
                            
-                           # STAMPATO UNICAMENTE UNA VOLTA FUORI DAL LOOP
                            st.html(news_html)
 
                    if isinstance(st.session_state['news'], str):
-                           # USATO ST.HTML
                            st.html(f"""
                                <div style="text-align:center; font-size: 14px;">
                                    {st.session_state['news']}
@@ -1036,7 +1055,6 @@ with col2:
                         try:
                             visual_gap(nome_ticker, (n_gap-1), st.session_state['dati_storici_ADJ'])
                         except:
-                            # USATO ST.HTML
                             st.html(f"""
                                  <div style="text-align: center; font-size: 15px;">
                                      grafico non disponibile
