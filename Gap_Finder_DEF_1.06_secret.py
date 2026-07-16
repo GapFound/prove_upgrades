@@ -6,7 +6,6 @@ Created on Thu Dec  5 11:34:33 2024
 @author: ninni
 """
 
-
 import numpy as np
 import pandas as pd
 import requests
@@ -35,7 +34,7 @@ session.headers.update({
 
 #%%
 
-# FUNZIONE HELPER PER SCARICARE IL PROFILO AZIENDALE DA MASSIVE/POLYGON
+# FUNZIONE HELPER PER SCARICARE IL PROFILO AZIENDALE DA MASSIVE/POLYGON CON MAPPATURA MACRO-SETTORI SEC
 def fetch_polygon_profile(nome_ticker):
     default_profile = {
         'nationality_exchange': {'nation': " - ", 'exchange': " - "},
@@ -65,16 +64,48 @@ def fetch_polygon_profile(nome_ticker):
             raw_exchange = results.get('primary_exchange', ' - ')
             exchange_cleaned = exchange_map.get(raw_exchange, raw_exchange)
             
-            # Mappatura della descrizione SIC come settore/industria ufficiale
-            sic_desc = results.get('sic_description', ' - ').title()
+            # Mappatura intelligente del macro-settore tramite le prime due cifre del codice SIC
+            sic_code = results.get('sic_code', '')
+            sector = " - "
+            if sic_code and len(sic_code) >= 2:
+                prefix = sic_code[:2]
+                try:
+                    prefix_val = int(prefix)
+                    if 1 <= prefix_val <= 9:
+                        sector = "Agriculture, Forestry, Fishing"
+                    elif 10 <= prefix_val <= 14:
+                        sector = "Mining & Energy Extraction"
+                    elif 15 <= prefix_val <= 17:
+                        sector = "Construction"
+                    elif 20 <= prefix_val <= 39:
+                        sector = "Manufacturing"
+                    elif 40 <= prefix_val <= 49:
+                        sector = "Transportation & Utilities"
+                    elif 50 <= prefix_val <= 51:
+                        sector = "Wholesale Trade"
+                    elif 52 <= prefix_val <= 59:
+                        sector = "Retail Trade"
+                    elif 60 <= prefix_val <= 67:
+                        sector = "Finance, Insurance, Real Estate"
+                    elif 70 <= prefix_val <= 89:
+                        sector = "Services & Technology"
+                    elif 91 <= prefix_val <= 99:
+                        sector = "Public Administration"
+                except ValueError:
+                    pass
             
+            # Se la mappatura SIC fallisce, usiamo la sic_description come fallback per il settore
+            sic_desc = results.get('sic_description', ' - ').title()
+            if sector == " - ":
+                sector = sic_desc
+                
             return {
                 'nationality_exchange': {
                     'nation': results.get('locale', 'US').upper(),
                     'exchange': exchange_cleaned
                 },
                 'sector_industry': {
-                    'sector': sic_desc,
+                    'sector': sector,
                     'industry': sic_desc
                 },
                 'website': results.get('homepage_url', '')
@@ -330,7 +361,7 @@ def stock_split(nome_ticker, cache_file, FMP_api_key):
 
 #%%
 
-# CARICO I DATI FONDAMENTALI DA FINVIZ e YFINANCE
+# CARICO I DATI FONDAMENTALI DA YFINANCE (ED ESCLUDO FINVIZ)
 
 def fondamentali_func(nome_ticker):
     fond_df = nationality = exchange = sector = industry = website = None
@@ -382,7 +413,7 @@ def fondamentali_func(nome_ticker):
         website = ""
         fondamentali_yf = {market_cap: ' - ', outstanding: ' - ', shares_float: ' - ', insider_own: ' - ', inst_own: ' - ', short_float: ' - ' }
      
-    # Carichiamo direttamente il profilo (Settore, Exchange, Website) caricato e gestito dalla Cache in datagathering_func
+    # Carichiamo direttamente il profilo (Settore, Exchange, Website) gestito dalla Cache in datagathering_func
     cached_profile = st.session_state.get('cached_profile', None)
     if cached_profile:
         nationality_exchange = cached_profile['nationality_exchange']
@@ -437,7 +468,7 @@ def news_func(nome_ticker):
 
 #%%
 
-# CARICO I VALORI di PREZZO DA YFINANCE o da ALPHA_VANTAGE (E GESTIONE LAZY-LOAD CACHE DEL PROFILO MASSIVE/POLYGON)
+# CARICO I VALORI di PREZZO (E GESTIONE LAZY-LOAD CACHE DEL PROFILO CON MAPPATURA MACRO-SETTORI POLGYON/MASSIVE)
 
 def datagathering_func(nome_ticker):
     dati_storici = pd.DataFrame(); splits_format = pd.DataFrame(); caricato = 0; provider = "" 
@@ -913,7 +944,7 @@ with col1:
             else:
                 ticker_html = f"{nome_ticker.upper()}"
 
-            # ST.HTML CARICA DIRETTAMENTE EXCHANGE E SETTORE DA MASSIVE/POLYGON
+            # ST.HTML CARICA DIRETTAMENTE EXCHANGE, SETTORE E INDUSTRIA DA MASSIVE/POLYGON SENZA RIPETIZIONI
             st.html(f"""
                 <div style="font-size: 22px; font-weight: bold; margin-bottom: 2px;">
                     {ticker_html}
@@ -986,8 +1017,24 @@ with col2:
            st.write(""); st.write("")
            
            if not v_gaps.empty:
+               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER CON SCROLLER ORIZZONTALE SULLE TABELLE
                render_table_with_slider(v_gaps, key="gaps")
+               
+               # CALCOLO E VISUALIZZAZIONE DELLE STATISTICHE DI CHIUSURA RED/GREEN DEI GAPPER FILTRATI
+               total_gaps = len(v_gaps)
+               red_count = len(v_gaps[v_gaps['Chiusura'] == 'RED'])
+               green_count = len(v_gaps[v_gaps['Chiusura'] == 'GREEN'])
+               
+               red_pct = (red_count / total_gaps) * 100
+               green_pct = (green_count / total_gaps) * 100
+               
+               st.html(f"""
+                   <div style="text-align: center; font-size: 13.5px; margin-top: 10px; margin-bottom: 5px; font-weight: bold;">
+                       🟥 RED: {red_pct:.2f}% &nbsp;|&nbsp; GREEN: {green_pct:.2f}% 🟩
+                   </div>
+               """)
            else:
+               # ABBIAMO AGGIORNATO CON ST.HTML
                st.html(f"""
                     <div style="text-align: center; font-size: 14.5px;">
                         <b>{nome_ticker.upper()}</b> non ha giornate rispondenti ai parametri settati
@@ -998,6 +1045,7 @@ with col2:
           
            with col2_5: 
                    st.write(""); st.write(""); st.write(""); st.write(""); st.write("")
+                   # ABBIAMO AGGIORNATO CON ST.HTML
                    st.html(f"""
                        <div style="text-align:center; font-size: 14px;">
                            <b>news:</b> <br/> <br/>
@@ -1005,6 +1053,7 @@ with col2:
                    """)
                                    
                    if isinstance(st.session_state['news'], pd.DataFrame):
+                           # ACCUMULATORE PER EVITARE GLI SPAZI VERTICALI NELLE NEWS
                            news_html = ""
                            for a, b in st.session_state['news'].iterrows():
                                ora = datetime.now().hour
@@ -1026,6 +1075,7 @@ with col2:
                                if not link.startswith('http'):
                                     link = "https://finviz.com/" + b['Link']
                                         
+                               # USATO ST.HTML CHE RISOLVE ALL'ORIGINE I BOX GRIGI
                                news_html += f"""
                                     <div style="text-align:left; font-size: 13px; margin-bottom: 6px; line-height: 1.3;">
                                         <strong style="color: red;">{data_da_stampa}</strong>&nbsp;
@@ -1035,9 +1085,11 @@ with col2:
                                     </div>
                                """
                            
+                           # STAMPATO UNICAMENTE UNA VOLTA FUORI DAL LOOP
                            st.html(news_html)
 
                    if isinstance(st.session_state['news'], str):
+                           # USATO ST.HTML
                            st.html(f"""
                                <div style="text-align:center; font-size: 14px;">
                                    {st.session_state['news']}
@@ -1055,6 +1107,7 @@ with col2:
                         try:
                             visual_gap(nome_ticker, (n_gap-1), st.session_state['dati_storici_ADJ'])
                         except:
+                            # USATO ST.HTML
                             st.html(f"""
                                  <div style="text-align: center; font-size: 15px;">
                                      grafico non disponibile
