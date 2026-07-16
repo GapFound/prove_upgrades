@@ -66,7 +66,6 @@ def render_table_with_slider(
       box-sizing:border-box; overflow:visible;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
 
-      <!-- IMPORTANT: overflow-x:hidden per eliminare la barra nativa -->
       <div id="gf-scroller-{key}" style="
         overflow-y:auto; overflow-x:hidden;
         border:1px solid #ddd; height:{scroller_h}px;
@@ -77,7 +76,6 @@ def render_table_with_slider(
         </div>
       </div>
 
-      <!-- Slider -->
       <div id="gf-slider-wrap-{key}" class="gf-slider">
         <div class="gf-track"></div>
         <div id="gf-fill-{key}" class="gf-fill"></div>
@@ -87,7 +85,6 @@ def render_table_with_slider(
     </div>
 
     <style>
-      /* Tabella */
       #gf-wrap-{key} table {{
         border-collapse: separate; border-spacing:0;
         width: max-content;
@@ -105,23 +102,18 @@ def render_table_with_slider(
         position: sticky; top: 0;
         background:#fafafa; z-index:1;
       }}
-
-      /* Colonna indice (FIX: max-width corretto) */
       #gf-wrap-{key} thead th:first-child,
       #gf-wrap-{key} tbody td:first-child {{
         text-align:center;
         width:26px; min-width:26px; max-width:26px;
         color:#444;
       }}
-
-      /* Nascondi barra H nativa ovunque */
       #gf-scroller-{key} {{
-        -ms-overflow-style: none;        /* IE/Edge legacy */
-        scrollbar-width: none;           /* Firefox */
+        -ms-overflow-style: none;        
+        scrollbar-width: none;           
       }}
-      #gf-scroller-{key}::-webkit-scrollbar:horizontal {{ height:0px; display:none; }}  /* WebKit */
+      #gf-scroller-{key}::-webkit-scrollbar:horizontal {{ height:0px; display:none; }}  
 
-      /* Slider custom */
       .gf-slider {{ position:relative; height:34px; margin-top:2px; z-index:2147483200; overflow:visible; }}
       .gf-track  {{ position:absolute; left:10px; right:10px; top:40%; height:3px; background:#e5e7eb; transform:translateY(-50%); border-radius:2px; z-index:1; }}
       .gf-fill   {{ position:absolute; left:10px; top:40%; height:3px; background:#d00; transform:translateY(-50%); border-radius:2px; width:0px; z-index:2; }}
@@ -338,55 +330,42 @@ def fondamentali_func(nome_ticker):
                             short_float: aggiusto_perc('shortPercentOfFloat')}
     except:  
         website = ""
-        fondamentali_yf = {market_cap: ' - ',
-                        outstanding: ' - ',   
-                        shares_float: ' - ',
-                        insider_own: ' - ',
-                        inst_own: ' - ',
-                        short_float: ' - ' }
+        fondamentali_yf = {market_cap: ' - ', outstanding: ' - ', shares_float: ' - ', insider_own: ' - ', inst_own: ' - ', short_float: ' - ' }
      
-    finvitz_data = None
-    tentativi = 1
-    while tentativi < 5:
-        try:
-            finvitz_stampa = st.empty()
-            with finvitz_stampa.container():
-                st.write('loading...')
-                stock = finvizfinance(nome_ticker)
-                finvitz_data = stock.ticker_fundament()
-                
-                def prendi_voce(voce):
-                    try:
-                        risposta = finvitz_data.get(voce)  
-                    except:
-                        risposta = ' - '
-                    return risposta   
-                
-                nationality_exchange = {'nation': prendi_voce("Country"), 'exchange': prendi_voce("Exchange")}            
-                sector_industry = {'sector': prendi_voce("Sector"), 'industry': prendi_voce("Industry")}
-                
-                fondamentali_fz = {market_cap: prendi_voce('Market Cap'),
-                                 outstanding: prendi_voce('Shs Outstand'),
-                                shares_float: prendi_voce('Shs Float'),
-                                insider_own: prendi_voce('Insider Own'),
-                                inst_own: prendi_voce('Inst Own'),
-                                short_float: prendi_voce('Short Float')}
-                                                                             
-                finvitz_stampa.empty()
-                break   
-        except:
-            finvitz_stampa.empty()
-            tentativi += 1
-        
-    if tentativi == 5: 
-        fondamentali_fz = {market_cap: ' - ',
-                        outstanding: ' - ',   
-                        shares_float: ' - ',
-                        insider_own: ' - ',
-                        inst_own: ' - ',
-                        short_float: ' - ' }
+    # 2. CONTROLLO SE ABBIAMO IL PROFILO CARICATO DA CACHE (NIENTE CHIAMATE ESTERNE SE GIA' SALVATO)
+    cached_profile = st.session_state.get('cached_profile', None)
+    if cached_profile:
+        nationality_exchange = cached_profile['nationality_exchange']
+        sector_industry = cached_profile['sector_industry']
+        website = cached_profile['website'] if not website else website
+    else:
+        # 3. SE NON CACHATO, PROVIAMO FINVIZ COME PRIMO TENTATIVO
         nationality_exchange = {'nation': " - ", 'exchange': " - "}
         sector_industry = {'sector': ' - ', 'industry': ' - '}
+        try:
+            stock = finvizfinance(nome_ticker)
+            finvitz_data = stock.ticker_fundament()
+            
+            def prendi_voce(voce):
+                try:
+                    return finvitz_data.get(voce, ' - ')
+                except:
+                    return ' - '
+            
+            nationality_exchange = {'nation': prendi_voce("Country"), 'exchange': prendi_voce("Exchange")}            
+            sector_industry = {'sector': prendi_voce("Sector"), 'industry': prendi_voce("Industry")}
+        except:
+            pass
+        
+    fondamentali_fz = {market_cap: ' - ', outstanding: ' - ', shares_float: ' - ', insider_own: ' - ', inst_own: ' - ', short_float: ' - ' }
+    try:
+        stock = finvizfinance(nome_ticker)
+        finvitz_data = stock.ticker_fundament()
+        def prendi_voce(voce):
+            return finvitz_data.get(voce, ' - ')
+        fondamentali_fz = {market_cap: prendi_voce('Market Cap'), outstanding: prendi_voce('Shs Outstand'), shares_float: prendi_voce('Shs Float'), insider_own: prendi_voce('Insider Own'), inst_own: prendi_voce('Inst Own'), short_float: prendi_voce('Short Float')}
+    except:
+        pass
         
     fond_fz_df = pd.DataFrame({'a': fondamentali_fz.keys(), 'Fz': fondamentali_fz.values()})
     fond_yf_df = pd.DataFrame({'a': fondamentali_yf.keys(), 'Yf': fondamentali_yf.values()})
@@ -422,7 +401,7 @@ def news_func(nome_ticker):
 
 #%%
 
-# CARICO I VALORI di PREZZO DA YFINANCE o da ALPHA_VANTAGE
+# CARICO I VALORI di PREZZO DA YFINANCE o da ALPHA_VANTAGE (E GESTIONE CACHE INTELLIGENTE DEL PROFILO FMP)
 
 def datagathering_func(nome_ticker):
     dati_storici = pd.DataFrame(); splits_format = pd.DataFrame(); caricato = 0; provider = "" 
@@ -434,14 +413,41 @@ def datagathering_func(nome_ticker):
         
     if os.path.exists(cache_file):
           with open(cache_file, "rb") as fp:
-              print(f"Caricamento dati daily e splits {nome_ticker} dalla cache.")
+              print(f"Caricamento dati daily, splits e profilo {nome_ticker} dalla cache.")
               cache_data = pickle.load(fp)
               dati_storici = cache_data['dati_storici']
               splits_format = cache_data['splits']
               provider = cache_data['provider']
+              
+              # Carica il profilo precedentemente salvato in cache per consumare 0 chiamate FMP
+              st.session_state['cached_profile'] = cache_data.get('profile', None)
               caricato = 1
    
     if caricato == 0:
+        # Se è un nuovo ticker, interroghiamo il profilo FMP una sola volta e lo salviamo permanentemente
+        fmp_profile = {'nationality_exchange': {'nation': " - ", 'exchange': " - "}, 'sector_industry': {'sector': ' - ', 'industry': ' - '}, 'website': ''}
+        try:
+            FMP_api_key = st.secrets["FMP_api_key"]
+            url = f"https://financialmodelingprep.com/api/v3/profile/{nome_ticker.upper()}?apikey={FMP_api_key}"
+            res = requests.get(url).json()
+            if res and len(res) > 0:
+                profile = res[0]
+                fmp_profile = {
+                    'nationality_exchange': {
+                        'nation': profile.get('country', 'US'),
+                        'exchange': profile.get('exchangeShortName', ' - ')
+                    },
+                    'sector_industry': {
+                        'sector': profile.get('sector', ' - '),
+                        'industry': profile.get('industry', ' - ')
+                    },
+                    'website': profile.get('website', '')
+                }
+        except:
+            pass
+        
+        st.session_state['cached_profile'] = fmp_profile
+        
         try:     
             print(f'provo a prendere i dati splits di {nome_ticker} da FMP')
             FMP_api_key = st.secrets["FMP_api_key"]
@@ -450,7 +456,6 @@ def datagathering_func(nome_ticker):
              splits_df=pd.DataFrame()
                 
         try:
-            # Passata la sessione protetta per evitare blocchi IP
             ticker = yf.Ticker(nome_ticker.upper(), session=session)   
             dati_storici = ticker.history(period="max")
             
@@ -550,7 +555,12 @@ def datagathering_func(nome_ticker):
              
         if caricato == 0:
                with open(cache_file, 'wb') as fp:
-                   pickle.dump({'dati_storici': dati_storici, 'splits': splits_format, 'provider': provider}, fp)
+                   pickle.dump({
+                       'dati_storici': dati_storici, 
+                       'splits': splits_format, 
+                       'provider': provider,
+                       'profile': fmp_profile # Salviamo il profilo FMP nella cache locale
+                   }, fp)
                return dati_storici, splits_format, provider
     else:
         if dati_storici.empty:
@@ -886,7 +896,6 @@ with col1:
                 <div style="font-size: 13px; font-weight: normal; color: #444;">
                     {st.session_state['sector_industry']['industry']}
                 </div>
-                <br>
             """)
 
             st.table(st.session_state['fondamentali'])
@@ -954,6 +963,7 @@ with col2:
                # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER CON SCROLLER ORIZZONTALE SULLE TABELLE
                render_table_with_slider(v_gaps, key="gaps")
            else:
+               # ABBIAMO AGGIORNATO CON ST.HTML
                st.html(f"""
                     <div style="text-align: center; font-size: 14.5px;">
                         <b>{nome_ticker.upper()}</b> non ha giornate rispondenti ai parametri settati
@@ -964,6 +974,7 @@ with col2:
           
            with col2_5: 
                    st.write(""); st.write(""); st.write(""); st.write(""); st.write("")
+                   # ABBIAMO AGGIORNATO CON ST.HTML
                    st.html(f"""
                        <div style="text-align:center; font-size: 14px;">
                            <b>news:</b> <br/> <br/>
@@ -993,6 +1004,7 @@ with col2:
                                if not link.startswith('http'):
                                     link = "https://finviz.com/" + b['Link']
                                         
+                               # USATO ST.HTML CHE RISOLVE ALL'ORIGINE I BOX GRIGI
                                news_html += f"""
                                     <div style="text-align:left; font-size: 13px; margin-bottom: 6px; line-height: 1.3;">
                                         <strong style="color: red;">{data_da_stampa}</strong>&nbsp;
@@ -1006,6 +1018,7 @@ with col2:
                            st.html(news_html)
 
                    if isinstance(st.session_state['news'], str):
+                           # USATO ST.HTML
                            st.html(f"""
                                <div style="text-align:center; font-size: 14px;">
                                    {st.session_state['news']}
@@ -1023,6 +1036,7 @@ with col2:
                         try:
                             visual_gap(nome_ticker, (n_gap-1), st.session_state['dati_storici_ADJ'])
                         except:
+                            # USATO ST.HTML
                             st.html(f"""
                                  <div style="text-align: center; font-size: 15px;">
                                      grafico non disponibile
