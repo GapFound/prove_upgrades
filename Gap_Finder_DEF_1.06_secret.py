@@ -24,7 +24,6 @@ import streamlit as st
 import pickle
 import os
 import sys
-import textwrap
 
 # INIZIALIZZAZIONE DELLA SESSIONE GLOBALE PER EVITARE I BLOCCHI DI YAHOO FINANCE
 session = requests.Session()
@@ -717,7 +716,8 @@ with col1:
             else:
                 ticker_html = f"{nome_ticker.upper()}"
 
-            st.markdown(textwrap.dedent(f"""
+            # ABBIAMO CAMBIATO DA ST.MARKDOWN A ST.HTML PER EVITARE I CONFLITTI DI COGNIZIONE
+            st.html(f"""
                 <div style="font-size: 22px; font-weight: bold; margin-bottom: 2px;">
                     {ticker_html}
                 </div>
@@ -729,7 +729,7 @@ with col1:
                     {st.session_state['sector_industry']['industry']}
                 </div>
                 <br>
-            """), unsafe_allow_html=True)
+            """)
 
             st.table(st.session_state['fondamentali'])
             print(st.session_state['fondamentali'])
@@ -741,11 +741,12 @@ with col1:
                 st.write("")
     
                 for a, b in st.session_state['dati_split'].iterrows():
-                     st.markdown(textwrap.dedent(f"""
+                     # USATO ST.HTML ANCHE QUI
+                     st.html(f"""
                                 <div style="font-size: 13px;">
                                     {a} <b>&nbsp;&nbsp;--&nbsp;&nbsp;</b> {b['split_factor']}
                                 </div>
-                            """), unsafe_allow_html=True)
+                            """)
 
 with col2:
     st.markdown(
@@ -792,22 +793,23 @@ with col2:
            if not v_gaps.empty:
                st.table(v_gaps)
            else:
-               st.markdown(textwrap.dedent(f"""
+               # ABBIAMO AGGIORNATO CON ST.HTML
+               st.html(f"""
                     <div style="text-align: center; font-size: 14.5px;">
                         <b>{nome_ticker.upper()}</b> non ha giornate rispondenti ai parametri settati
                     </div>
-                """), unsafe_allow_html=True)
+                """)
                
            col2_4, col2_5, col2_6 = st.columns([0.20, 0.83, 0.14])
           
            with col2_5: 
                    st.write(""); st.write(""); st.write(""); st.write(""); st.write("")
-                   # Corretto il tag <b>news:</b> (prima c'era <b/> orfano)
-                   st.markdown(textwrap.dedent(f"""
+                   # ABBIAMO AGGIORNATO CON ST.HTML
+                   st.html(f"""
                        <div style="text-align:center; font-size: 14px;">
                            <b>news:</b> <br/> <br/>
                        </div>
-                   """), unsafe_allow_html=True)
+                   """)
                                    
                    if isinstance(st.session_state['news'], pd.DataFrame):
                            for a, b in st.session_state['news'].iterrows():
@@ -831,23 +833,23 @@ with col2:
                                     if not link.startswith('http'):
                                         link = "https://finviz.com/" + b['Link']
                                             
-                                    # Usato textwrap.dedent per rimuovere definitivamente i box grigi delle notizie
-                                    st.markdown(textwrap.dedent(f"""
+                                    # USATO ST.HTML CHE RISOLVE ALL'ORIGINE I BOX GRIGI
+                                    st.html(f"""
                                         <div style="text-align:left; font-size: 13px;">
                                             <strong style="color: red;">{data_da_stampa}</strong>&nbsp;
                                             <a href="{link}" style="text-decoration: none; color: inherit;">
                                                 {b['Title']}
                                             </a>
                                         </div>
-                                    """), unsafe_allow_html=True)
+                                    """)
 
                    if isinstance(st.session_state['news'], str):
-                           # Rimosso tag </a> orfano nel markdown della stringa
-                           st.markdown(textwrap.dedent(f"""
+                           # USATO ST.HTML
+                           st.html(f"""
                                <div style="text-align:center; font-size: 14px;">
                                    {st.session_state['news']}
                                </div>
-                           """), unsafe_allow_html=True)
+                           """)
  
            if not v_gaps.empty:
                 with col3:
@@ -860,11 +862,12 @@ with col2:
                         try:
                             visual_gap(nome_ticker, (n_gap-1), st.session_state['dati_storici_ADJ'])
                         except:
-                            st.markdown(textwrap.dedent(f"""
+                            # USATO ST.HTML
+                            st.html(f"""
                                  <div style="text-align: center; font-size: 15px;">
                                      grafico non disponibile
                                  </div>
-                             """), unsafe_allow_html=True)
+                             """)
 
 st.markdown("""
     <style>
