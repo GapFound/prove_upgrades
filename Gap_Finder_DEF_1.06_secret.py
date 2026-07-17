@@ -77,6 +77,7 @@ def fetch_sec_data(cik):
         'risk_status': 'UNKNOWN',
         'active_offering': 'Nessuna offering registrata di recente',
         'active_offering_date': ' - ',
+        'active_offering_form': ' - ',
         'sec_links': []
     }
     if not cik or str(cik).strip() in ['', '-', ' - ']:
@@ -151,6 +152,7 @@ def fetch_sec_data(cik):
         
         active_offering = "Nessuna offering pendente registrata di recente"
         active_offering_date = " - "
+        active_offering_form = " - "
         sec_links = []
         
         if sub_res.status_code == 200:
@@ -190,6 +192,7 @@ def fetch_sec_data(cik):
                         if (datetime.now().date() - filing_dt).days <= 180:
                             active_offering = f" Form {form_type} depositato il {filing_date}"
                             active_offering_date = filing_date
+                            active_offering_form = form_type
                             risk_status = "RED" # Scatta l'allerta rossa di diluizione attiva
                             found_offering = True
                     except:
@@ -220,6 +223,7 @@ def fetch_sec_data(cik):
             'risk_status': risk_status,
             'active_offering': active_offering,
             'active_offering_date': active_offering_date,
+            'active_offering_form': active_offering_form,
             'sec_links': sec_links
         }
     except Exception as e:
@@ -781,12 +785,22 @@ def datagathering_func(nome_ticker):
               
               profile_data = cache_data.get('profile', None)
               
-              # LAZY-LOAD INTELLIGENTE: Se il profilo o i dati SEC mancano nel vecchio file .pkl, lo scarichiamo una volta sola e ri-salviamo il file .pkl
-              if (profile_data is None or 'sec_data' not in profile_data) and not dati_storici.empty:
-                  print("Profilo o dati SEC mancanti nella vecchia cache. Eseguo lazy-load da Massive/Polygon e SEC.")
+              # CONDIZIONE DI AGGIORNAMENTO SPECIFICHE (Per evitare letture pedisseque di cache obsolete)
+              needs_sec_update = False
+              if profile_data is None:
+                  needs_sec_update = True
+              else:
+                  sec_data = profile_data.get('sec_data')
+                  # Se mancano i nuovi campi richiesti dalle specifiche (es. 'active_offering_form') forziamo la rigenerazione
+                  if not isinstance(sec_data, dict) or 'active_offering_form' not in sec_data:
+                      needs_sec_update = True
+              
+              if needs_sec_update and not dati_storici.empty:
+                  print("Cache obsoleta o incompleta rilevata. Eseguo l'aggiornamento automatico con le nuove specifiche.")
                   if profile_data is None:
                       profile_data = fetch_polygon_profile(nome_ticker)
-                  # Scarica i dati finanziari SEC usando il CIK in sicurezza
+                  
+                  # Scarica i dati finanziari SEC freschi con la nuova logica (che include active_offering_form)
                   sec_metrics = fetch_sec_data(profile_data.get('cik', ''))
                   profile_data['sec_data'] = sec_metrics
                   
@@ -795,7 +809,7 @@ def datagathering_func(nome_ticker):
                       with open(cache_file, 'wb') as out_fp:
                           pickle.dump(cache_data, out_fp)
                   except Exception as e:
-                      print("Errore nell'aggiornamento cache con profilo:", e)
+                      print("Errore nell'aggiornamento della cache:", e)
               
               st.session_state['cached_profile'] = profile_data
               caricato = 1
@@ -964,7 +978,124 @@ def ricerca_gaps(nome_ticker, dati_storici, gap_perc_A, gap_perc_B, volume, prez
         return display_gaps
     else: 
         print(f' il titolo {nome_ticker} non ha nessun gap superiore o uguale al {gap_perc_A}%')
-        return gaps
+        return display_gaps
+        
+#%%
+
+## VISUALIZZA IL GRAFICO DEL GAP (NON PIÙ USATO MA MANTENUTO PER COMPATIBILITÀ)
+
+def visual_gap(nome_ticker, n_gap, dati_storici_ADJ):
+    global gaps
+    finestra_daily = 100
+
+    elementi_da_inizio_df = gaps.index[n_gap]
+    if elementi_da_inizio_df > round(finestra_daily/2):
+        finestra_A = round(finestra_daily/2)
+    else:
+        finestra_A = elementi_da_inizio_df
+        
+    elementi_da_fine_df = (dati_storici_ADJ.shape[0])-elementi_da_inizio_df
+    if elementi_da_fine_df > round(finestra_daily/2):
+        finestra_B = round(finestra_daily/2)
+    else:
+        finestra_B = elementi_da_fine_df
+    
+    df = dati_storici_ADJ.iloc[gaps.index[n_gap]-(finestra_A)\
+                               :gaps.index[n_gap]+(finestra_B), :].copy()
+    
+    df['hover_text'] = (
+        "Data: " + df['Date'].astype(str) + "<br>" +
+        "Open: " + df['Open'].astype(str) + "<br>" +
+        "High: " + df['High'].astype(str) + "<br>" +
+        "Low: " + df['Low'].astype(str) + "<br>" +
+        "Close: " + df['Close'].astype(str) + "<br>" +
+        "Gap %: " + df['Gap %'].astype(str) + "<br>"
+    )
+    
+    df['volume_text'] = df.apply(lambda x: f"{x['Volume']:,.0f}".replace(",", "."), axis=1)
+    df['volume_text'] = ("Volume: "+df['volume_text'].astype(str))
+    
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        row_heights=[0.8, 0.2],
+        vertical_spacing= 0.15
+    )
+    
+    fig.add_trace(
+        go.Candlestick(
+            x=df['Date'],
+            open=df['Open'],
+            high=df['High'],
+            low=df['Low'],
+            close=df['Close'],
+            name="Daily",
+            hovertext=df['hover_text'],  
+            hoverinfo="text"  
+        ),
+        row=1, col=1
+    )
+    
+    fig.add_trace(
+        go.Bar(
+            x=df['Date'],
+            y=df['Volume'],
+            name="Volume",
+            hovertext=df['volume_text'],
+            hoverinfo="text",
+            marker_color='blue',
+            opacity=0.6
+        ),
+        row=2, col=1
+    )
+    
+    if finestra_A >= 5:
+        finestra_visione_A = 5 
+    else:
+        finestra_visione_A = finestra_A-1   
+    
+    if finestra_B >= 5:
+        finestra_visione_B = 5 
+    else:
+        finestra_visione_B = finestra_B-1
+    
+    fig.update_layout(
+        title=f"          <b>{nome_ticker.upper()}</b> -  Grafico Gap del    {gaps.iloc[n_gap, 0]}",
+        yaxis_title="Prezzo",
+        xaxis_rangeslider={'thickness': 0.08, 'visible': True},
+        template="plotly_white",
+        width=800,
+        height=600,
+        shapes=[
+            {
+                'type': "rect",
+                'xref': "x",
+                'yref': "paper",
+                'x0': df['Date'].loc[gaps.index[n_gap]],
+                'x1': df['Date'].loc[gaps.index[n_gap] - 1],
+                'y0': 0.80,
+                'y1': 0.40,
+                'fillcolor': 'Orange',
+                'opacity': 0.1,
+                'layer': "below",
+                'line_width': 0
+            }
+        ]
+    )
+    
+    fig.update_xaxes(
+        range=[
+            df['Date'].loc[gaps.index[n_gap] - finestra_visione_A], 
+            df['Date'].loc[gaps.index[n_gap] + finestra_visione_B]
+        ]
+    )
+    
+    st.plotly_chart(fig, use_container_width=False, config={
+        'displayModeBar': True,  
+        'responsive': True,      
+        'scrollZoom': True,      
+        'staticPlot': False     
+    })
 
 #%%    
         
@@ -976,8 +1107,7 @@ st.set_page_config(
     layout="wide",  
 ) 
 
-# INTEGRATO IL CORRIDOIO DI SPAZIATURA AL 2% RICHIESTO DA LUCA PER ALLONTANARE LA TABELLA DAL COCKPIT
-col1, col2, spacer_col, col3 = st.columns([0.11, 0.46, 0.02, 0.41])   
+col1, col2, col3 = st.columns([0.11, 0.45, 0.44])   
     
 # INSERISCO il TICKER
 global nome_ticker
@@ -1286,13 +1416,8 @@ with col3:
             sec_data = cached_profile.get('sec_data')
             
         if isinstance(sec_data, dict):
-            # ESTRAZIONE DINAMICA DELLA DATA DALLA STRINGA (Supporta sia vecchie che nuove cache per evitare stalli)
-            active_offering_str = sec_data.get('active_offering', ' - ')
-            offering_date_str = None
-            if "depositato il" in active_offering_str:
-                offering_date_str = active_offering_str.split("depositato il")[-1].strip()
-            elif "registrato il" in active_offering_str:
-                offering_date_str = active_offering_str.split("registrato il")[-1].strip()
+            offering_date_str = sec_data.get('active_offering_date', ' - ')
+            form_type = sec_data.get('active_offering_form', ' - ')
                 
             short_edge = "UNKNOWN"
             edge_msg = "Analisi basata sulla runway trimestrale dei dati SEC e sul monitoraggio delle registrazioni di offering pendenti."
@@ -1310,32 +1435,56 @@ with col3:
                 if offering_date_str and str(offering_date_str).strip() not in ['', '-', ' - ']:
                     try:
                         # CONVERSIONE BLINDATA TRAMITE PD.TO_DATETIME PER PREVENIRE TYPEERROR DI PANDAS
-                        off_date_dt = pd.to_datetime(offering_date_str)
+                        off_date_dt = pd.to_datetime(offering_date_str).date()
                         
-                        # Filtriamo i dati storici dei gapper per trovare quelli successivi al deposito dell'offering
-                        df_hist = st.session_state['dati_storici'].copy()
-                        df_hist['Date_dt'] = pd.to_datetime(df_hist['Date'])
-                        
-                        # Definiamo i gap storici usando la soglia standard del 30%
-                        gaps_after = df_hist[(df_hist['Date_dt'] > off_date_dt) & (df_hist['Gap %'] >= 30.0)]
-                        
-                        if gaps_after.empty:
-                            short_edge = "CRITICAL"
-                            edge_msg = f"SHORT EDGE CRITICO (Opportunità Massima) — Nessun gap registrato dopo il deposito del {offering_date_str} (ATM/Shelf intatto)."
-                        else:
-                            red_gaps = gaps_after[gaps_after['Chiusura'] == 'RED']
-                            green_gaps = gaps_after[gaps_after['Chiusura'] == 'GREEN']
+                        # Filtriamo i dati storici globali di col2 (usando il dataframe global 'gaps' generato in ricerca_gaps)
+                        if 'gaps' in globals() and isinstance(gaps, pd.DataFrame) and not gaps.empty:
+                            gaps_df = gaps.copy()
+                            gaps_df['Date_dt'] = pd.to_datetime(gaps_df['Date']).dt.date
                             
-                            red_count = len(red_gaps)
-                            green_count = len(green_gaps)
+                            # Criterio: Gap >= 30% cronologicamente successivi all'offering
+                            gaps_after_30 = gaps_df[(gaps_df['Gap %'] >= 30.0) & (gaps_df['Date_dt'] > off_date_dt)]
                             
-                            # Se ci sono stati gap RED significativi, l'offering è digerita (vantaggio short basso)
-                            if red_count > 0:
-                                short_edge = "LOW"
-                                edge_msg = f"SHORT EDGE BASSO (Opportunità Minima) — Registrate {red_count} giornate in gap con chiusura RED dopo il deposito (Diluizione già digerita)."
+                            if gaps_after_30.empty:
+                                # Scenario 1: Nessun gap post-deposito
+                                short_edge = "CRITICAL"
+                                bg_color = "#ffebee"
+                                border_color = "#d32f2f"
+                                text_color = "#c62828"
+                                risk_label = "🚨 SHORT EDGE: OTTIMA OPPORTUNITA' - Nessuna giornata in gap dopo il deposito del modulo"
+                                edge_msg = f"⚠️ Form {form_type} depositato il {offering_date_str}. SHORT EDGE CRITICO: Nessun gap registrato dopo il deposito. L'offering (ATM/Shelf) è intatta e non ancora scaricata."
                             else:
-                                short_edge = "HIGH"
-                                edge_msg = f"SHORT EDGE ALTO (Opportunità Forte) — Registrate {green_count} giornate in gap con chiusura GREEN dopo il deposito (Offering non ancora scaricata)."
+                                red_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'RED']
+                                green_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'GREEN']
+                                
+                                n_red = len(red_gaps)
+                                n_green = len(green_gaps)
+                                n_total = len(gaps_after_30)
+                                
+                                if n_red > 0:
+                                    # Scenario 3: Almeno una chiusura RED post-deposito
+                                    short_edge = "LOW"
+                                    bg_color = "#e8f5e9"
+                                    border_color = "#388e3c"
+                                    text_color = "#2e7d32"
+                                    risk_label = f"✅ SHORT EDGE: OPPORTUNITA' BASSA - {n_red} giornate in gap con chiusura RED dopo il deposito del modulo"
+                                    edge_msg = f"✅ Form {form_type} depositato il {offering_date_str}. SHORT EDGE BASSO: Registrate {n_red} giornate in gap con chiusura RED dopo il deposito. La diluizione è probabilmente già stata completata e digerita dal mercato."
+                                else:
+                                    # Scenario 2: Gap successivi ma tutti GREEN post-deposito
+                                    short_edge = "HIGH"
+                                    bg_color = "#fffde7"
+                                    border_color = "#fbc02d"
+                                    text_color = "#f57f17"
+                                    risk_label = f"⚠️ SHORT EDGE: OTTIMA OPPORTUNITA' - {n_green} giornate in gap con chiusura GREEN dopo il deposito del modulo"
+                                    edge_msg = f"⚠️ Form {form_type} depositato il {offering_date_str}. SHORT EDGE ALTO: Registrate {n_green} giornate in gap con chiusura GREEN dopo il deposito. L'offering è ancora pendente e non interamente scaricata."
+                        else:
+                            # Se non ci sono gap rilevati in colonna 2, ricadiamo nello Scenario 1 (ATM intatto)
+                            short_edge = "CRITICAL"
+                            bg_color = "#ffebee"
+                            border_color = "#d32f2f"
+                            text_color = "#c62828"
+                            risk_label = "🚨 SHORT EDGE: OTTIMA OPPORTUNITA' - Nessuna giornata in gap dopo il deposito del modulo"
+                            edge_msg = f"⚠️ Form {form_type} depositato il {offering_date_str}. SHORT EDGE CRITICO: Nessun gap registrato dopo il deposito. L'offering (ATM/Shelf) è intatta e non ancora scaricata."
                     except Exception as e:
                         print("Errore calcolo cronologico short edge:", e)
                         short_edge = "UNKNOWN"
@@ -1344,6 +1493,10 @@ with col3:
                     raw_runway = sec_data.get('runway_months', ' - ')
                     if "Cash Flow" in raw_runway or "+" in raw_runway:
                         short_edge = "LOW"
+                        bg_color = "#e8f5e9"
+                        border_color = "#388e3c"
+                        text_color = "#2e7d32"
+                        risk_label = "✅ SHORT EDGE: BASSO (Opportunità Minima)"
                         edge_msg = "SHORT EDGE BASSO — Nessuna offering recente rilevata e cassa solida (flusso di cassa positivo)."
                     else:
                         try:
@@ -1351,38 +1504,28 @@ with col3:
                             r_val = float(raw_runway.split()[0])
                             if r_val < 3.0:
                                 short_edge = "CRITICAL"
+                                bg_color = "#ffebee"
+                                border_color = "#d32f2f"
+                                text_color = "#c62828"
+                                risk_label = "🚨 SHORT EDGE: CRITICO (Opportunità Massima)"
                                 edge_msg = f"SHORT EDGE CRITICO (Cassa in esaurimento) — Nessuna offering recente, ma autonomia inferiore a 3 mesi."
                             elif r_val < 12.0:
                                 short_edge = "HIGH"
+                                bg_color = "#fffde7"
+                                border_color = "#fbc02d"
+                                text_color = "#f57f17"
+                                risk_label = "⚠️ SHORT EDGE: ALTO (Opportunità Forte)"
                                 edge_msg = f"SHORT EDGE ALTO (Autonomia limitata) — Nessuna offering recente, ma autonomia inferiore a 12 mesi."
                             else:
                                 short_edge = "LOW"
+                                bg_color = "#e8f5e9"
+                                border_color = "#388e3c"
+                                text_color = "#2e7d32"
+                                risk_label = "✅ SHORT EDGE: BASSO (Opportunità Minima)"
                                 edge_msg = "SHORT EDGE BASSO — Nessuna offering recente e cassa sicura (oltre 12 mesi di autonomia)."
                         except:
                             short_edge = "UNKNOWN"
             
-            # Assegnazione dei colori del Badge in base all'opportunità Short
-            if short_edge == "CRITICAL":
-                bg_color = "#ffebee"
-                border_color = "#d32f2f"
-                text_color = "#c62828"
-                risk_label = "🚨 SHORT EDGE: CRITICO (Opportunità Massima)"
-            elif short_edge == "HIGH":
-                bg_color = "#fffde7"
-                border_color = "#fbc02d"
-                text_color = "#f57f17"
-                risk_label = "⚠️ SHORT EDGE: ALTO (Opportunità Forte)"
-            elif short_edge == "LOW":
-                bg_color = "#e8f5e9"
-                border_color = "#388e3c"
-                text_color = "#2e7d32"
-                risk_label = "✅ SHORT EDGE: BASSO (Opportunità Minima)"
-            elif short_edge == "UNKNOWN":
-                bg_color = "#f9f9f9"
-                border_color = "#ccc"
-                text_color = "#333"
-                risk_label = "SHORT EDGE: SCONOSCIUTO"
-                
             # Stampa il Badge Grafico in alto (Stringa piatta per evitare box grigi)
             risk_badge_html = f'<div style="background-color: {bg_color}; border-left: 5px solid {border_color}; padding: 12px; margin-top: 15px; margin-bottom: 20px; border-radius: 4px;"><span style="color: {text_color}; font-size: 15px; font-weight: bold;">{risk_label}</span><br><span style="color: #37474f; font-size: 12px;">{edge_msg}</span></div>'
             st.markdown(risk_badge_html, unsafe_allow_html=True)
@@ -1468,7 +1611,7 @@ with col3:
             
             # 3. Offering attive (Badge e allineamento) con il remind spostato elegantemente nell'help tooltip di st.markdown
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 15px; margin-bottom: 5px;'>⚠️ STATO REGISTRAZIONI & OFFERINGS</div>", unsafe_allow_html=True)
-            offering_box_html = f'<div style="background-color: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; font-size: 13px;" title="Dilution Alert: Se l\'autonomia della cassa o il test di liquidità indicano livelli critici (Rosso), la società ha altissime probabilità di diluire nel brevissimo periodo per far fronte alle passività correnti."><div style="margin-bottom: 4px;"><b>Stato Offering ℹ️</b>: {sec_data.get("active_offering", " - ")}</div><div>Passa il mouse per visualizzare il Dilution Alert sulla solvibilità della società.</div></div>'
+            offering_box_html = f'<div style="background-color: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; font-size: 13px;" title="Dilution Alert: Se l\'autonomia della cassa o il test di liquidità indicano livelli critici (Rosso), la società ha altissime probabilità di diluire nel brevissimo periodo per far fronte alle passività correnti."><div style="margin-bottom: 4px;"><b>Stato Offering ℹ️</b>: {edge_msg}</div><div>Passa il mouse per visualizzare il Dilution Alert sulla solvibilità della società.</div></div>'
             st.markdown(offering_box_html, unsafe_allow_html=True)
             
             # 4. Tabella degli ultimi link ai depositi SEC (Link in nuove schede con stringhe piatte)
