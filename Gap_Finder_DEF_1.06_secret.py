@@ -868,7 +868,7 @@ def datagathering_func(nome_ticker):
         
     if os.path.exists(cache_file):
           with open(cache_file, "rb") as fp:
-              print(f"Caricamento daily e splits {nome_ticker} dalla cache.")
+              print(f"Caricamento dati daily, splits e profilo {nome_ticker} dalla cache.")
               cache_data = pickle.load(fp)
               dati_storici = cache_data['dati_storici']
               splits_format = cache_data['splits']
@@ -1614,7 +1614,13 @@ with col3:
             except:
                 pass
 
-            # CARTE METRICHE COMPATTE HTML (Carattere ridotto a 18px per un cockpit a schede pulito e professionale)
+            # Estrazione variabili locali per evitare conflitti di apici annidati nelle espressioni delle f-string (compatibilità Python < 3.12)
+            cash_on_hand_val = sec_data.get('cash_on_hand', ' - ')
+            monthly_burn_val_str = sec_data.get('monthly_burn', ' - ')
+            curr_assets_ratio_val = sec_data.get('current_assets_ratio', ' - ')
+            liquidity_test_val = sec_data.get('liquidity_test', ' - ')
+
+            # 2. CARTE METRICHE COMPATTE HTML (Carattere ridotto a 18px per un cockpit a schede pulito e professionale)
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-bottom: 10px;'>📊 AUTONOMIA DI CASSA (CASH RUNWAY)</div>", unsafe_allow_html=True)
             
             # Griglia di metriche superiori (Cassa, Burn, Runway)
@@ -1622,11 +1628,11 @@ with col3:
             <div style="display: flex; gap: 10px; margin-bottom: 15px; font-family: system-ui,-apple-system; box-sizing: border-box;">
                 <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
                     <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Ultima cassa liquida disponibile dichiarata nel report SEC.">Cash on Hand ℹ️</div>
-                    <div style="font-size: 18px; font-weight: bold; color: #111;">{sec_data.get('cash_on_hand', ' - ')}</div>
+                    <div style="font-size: 18px; font-weight: bold; color: #111;">{cash_on_hand_val}</div>
                 </div>
                 <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
                     <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Velocità media di bruciatura mensile delle riserve liquide tra gli ultimi due trimestri.">Monthly Burn ℹ️</div>
-                    <div style="font-size: 18px; font-weight: bold; color: #111;">{sec_data.get('monthly_burn', ' - ')}</div>
+                    <div style="font-size: 18px; font-weight: bold; color: #111;">{monthly_burn_val_str}</div>
                 </div>
                 <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
                     <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Autonomia di cassa in mesi prima del completo esaurimento delle riserve (Sotto i 3 mesi: Rosso, Sotto i 12 mesi: Arancione, Sopra i 12: Verde).">Runway Cassa ℹ️</div>
@@ -1641,9 +1647,59 @@ with col3:
             <div style="display: flex; gap: 10px; margin-bottom: 20px; font-family: system-ui,-apple-system; box-sizing: border-box;">
                 <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
                     <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Indica quanta parte delle attività correnti dichiarate è composta da cassa liquida reale. Sotto il 20%: Rosso (attività illiquide).">Cash / Current Assets % ℹ️</div>
-                    <div style="font-size: 18px; font-weight: bold; color: {ratio_color};">{sec_data.get('current_assets_ratio', ' - ')}</div>
+                    <div style="font-size: 18px; font-weight: bold; color: {ratio_color};">{curr_assets_ratio_val}</div>
                 </div>
                 <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
                     <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Cassa liquida divisa per le passività correnti (debiti entro l'anno). Sotto 1.2 indica alto rischio di insolvenza immediata e diluizione forzata (Rosso).">Liquidity Test Ratio ℹ️</div>
-                    <div style="font-size: 18px; font-weight: bold; color: {liq_color};">{sec_data.get('liquidity_test', ' - ')}</div>
-                </
+                    <div style="font-size: 18px; font-weight: bold; color: {liq_color};">{liquidity_test_val}</div>
+                </div>
+            </div>
+            """
+            st.markdown(metrics_bottom_html, unsafe_allow_html=True)
+            
+            # Tabella degli ultimi link ai depositi SEC (I link sono applicati direttamente sul nome del modulo)
+            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 25px; margin-bottom: 8px;'>📂 ULTIMI DEPOSITI SEC EDGAR RILEVANTI</div>", unsafe_allow_html=True)
+            sec_links = sec_data.get('sec_links', [])
+            if sec_links:
+                sec_html = ""
+                for item in sec_links:
+                    date_val = item["date"]
+                    form_val = item["form"]
+                    link_val = item["link"]
+                    sec_html += f"""
+                    <div style="font-size: 13px; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid #f9f9f9; font-family: system-ui,-apple-system;">
+                        <span style="color: #666;">[{date_val}]</span>&nbsp;&nbsp;
+                        <a href="{link_val}" style="text-decoration: none; color: #d00; font-weight: bold;" target="_blank">Form {form_val}</a>
+                    </div>
+                    """
+                st.markdown(sec_html, unsafe_allow_html=True)
+            else:
+                st.write("Nessun deposito SEC recente catalogato per questo ticker.")
+        else:
+            # Se il CIK non esiste o Polygon non ha profilato il titolo (es. ETF o Warrants)
+            error_sec_html = f'<div style="background-color: #f9f9f9; border-left: 5px solid #ccc; padding: 12px; margin-top: 15px; border-radius: 4px; font-size: 13.5px;"><b>Dati SEC Non Disponibili</b><br>Il titolo cercato non possiede un codice CIK o i dati di bilancio standard SEC non sono registrati (comune per Warrant, ETF, SPAC o OTC molto illiquidi).</div>'
+            st.markdown(error_sec_html, unsafe_allow_html=True)
+
+st.markdown("""
+    <style>
+        .footer {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            text-align: center;
+            background-color: #e0e0e0; 
+            padding: 6px;
+        }
+        .footer a {
+            font-size: 12px; 
+            text-decoration: none;
+            color: blue; 
+        }
+        .footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+    <div class="footer">
+        <a href="https://GapFound.github.io/GAP_Finder_dipendent_files/disclaimer.html" target="_blank">Data Disclaimer</a>
+    </div>
+""", unsafe_allow_html=True)
