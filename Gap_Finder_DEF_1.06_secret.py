@@ -58,7 +58,7 @@ def get_latest_fact(us_gaap, tags):
         if node:
             units = node.get('units', {}).get('USD', [])
             if units:
-                # Filtra solo i report ufficiali 10-Q (trimestrali) e 10-K (annuali) per evitare duplicati
+                # Filtra solo i report ufficiali 10-Q (trimestrali), 10-K (annuali) e 20-F (esteri) per evitare duplicati
                 official = [u for u in units if u.get('form') in ['10-Q', '10-K', '20-F']]
                 if not official:
                     official = units
@@ -99,7 +99,7 @@ def fetch_sec_data(cik):
             facts = facts_res.json()
             us_gaap = facts.get('facts', {}).get('us-gaap', {})
             
-            # Dizionari di tag a cascata (fallback) per massima accuratezza su US-GAAP e IFRS (moduli 20-F esteri)
+            # Dizionari di tag a cascata (fallback) per massima accuratezza su US-GAAP e IFRS (moduli 20-F straniere)
             cash_tags = [
                 'CashAndCashEquivalentsAtCarryingValue',
                 'CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents',
@@ -118,7 +118,7 @@ def fetch_sec_data(cik):
             if cash_units and len(cash_units) >= 2:
                 latest_cash = float(cash_units[-1]['val'])
                 prev_cash = float(cash_units[-2]['val'])
-                cash_change = prev_cash - latest_cash # Se positivo indica decremento di cassa
+                cash_change = prev_cash - latest_cash # Se positivo indica decremento di cassa (bruciatura)
                 if cash_change > 0:
                     monthly_burn = cash_change / 3.0
         
@@ -171,18 +171,18 @@ def fetch_sec_data(cik):
                     except:
                         pass
         
-        # Calcolo finale dell'autonomia di Cassa (Runway)
+        # Calcolo finale dell'autonomia di Cassa (Runway) e gestione delle soglie di colore di Luca
         runway_str = " - "
         if cash_val is not None:
             if monthly_burn > 0:
                 runway_val = cash_val / monthly_burn
                 runway_str = f"{runway_val:.2f} Mesi"
-                if runway_val < 6.0:
-                    risk_status = "RED" # Cassa sotto i 6 mesi: Pericolo critico
+                if runway_val < 3.0:
+                    risk_status = "RED" # Sotto i 3 mesi: Pericolo Critico Rosso
                 elif runway_val < 12.0 and risk_status != "RED":
-                    risk_status = "YELLOW"
+                    risk_status = "YELLOW" # Tra 3 e 12 mesi: Arancione
             else:
-                runway_str = "Cash Flow Positive"
+                runway_str = "Cash Flow +" # Se non brucia, mostra Cash Flow + in verde
                 if risk_status != "RED":
                     risk_status = "GREEN"
                     
@@ -198,7 +198,7 @@ def fetch_sec_data(cik):
             liq_val = cash_val / liabilities_val
             liq_str = f"{liq_val:.2f}"
             if liq_val < 1.2:
-                risk_status = "RED" # Insolvenza immediata imminente: Rischio Rosso di diluizione forzata
+                risk_status = "RED" # Sotto 1.2: Rischio insolvenza immediata
             elif liq_val < 1.5 and risk_status != "RED":
                 risk_status = "YELLOW"
                 
@@ -771,7 +771,7 @@ def datagathering_func(nome_ticker):
               
               profile_data = cache_data.get('profile', None)
               
-              # LAZY-LOAD INTELLIGENTE: Se il profilo o i dati SEC mancano nel vecchio file .pkl, lo scarichiamo una volta sola e ri-salviamo il file .pkl
+              # LAZY-LOAD INTELLIGENTE: Se il profilo manca nel vecchio file .pkl, lo scarichiamo una volta sola e ri-salviamo il file .pkl
               if (profile_data is None or 'sec_data' not in profile_data) and not dati_storici.empty:
                   print("Profilo o dati SEC mancanti nella vecchia cache. Eseguo lazy-load da Massive/Polygon e SEC.")
                   if profile_data is None:
@@ -1084,8 +1084,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",  
 ) 
 
-# AGGIUNTA LA COLONNA DISTANZIATRICE (SPACER_COL AL 3%) PER DECENTRARE E DARE RESPIRO GRAFICO
-col1, col2, spacer_col, col3 = st.columns([0.11, 0.46, 0.03, 0.40])   
+col1, col2, col3 = st.columns([0.11, 0.45, 0.44])   
     
 # INSERISCO il TICKER
 global nome_ticker
@@ -1336,7 +1335,7 @@ with col2:
                     </div>
                 """)
                
-           # SOTTO-COLONNE SIMMETRICHE PER CENTRARE PERFETTEMENTE IL BLOCCO DELLE NEWS SOTTO LE STATISTICHE
+           # SOTTO-COLONNE SIMMETRICHE PER CENTRARE PERFETTAMENTE IL BLOCCO DELLE NEWS SOTTO LE STATISTICHE
            col2_4, col2_5, col2_6 = st.columns([0.10, 0.80, 0.10])
           
            with col2_5: 
@@ -1383,7 +1382,7 @@ with col2:
 
 with col3:
     # ---------------------------------------------------------------------------------
-    # LA PARTE DESTRA (COL3) DIVENTA ORA IL COCKPIT GRAFICO DI ANALISI DILUIZIONE & RISK SEC
+    # LA PARTE DESTRA (COL3) DIVENTA ORA IL COCKPIT GRAFICO DI ANALISI DILUIZIONE & RISK SEC (FORMATTAZIONE OTTIMIZZATA DI LUCA)
     # ---------------------------------------------------------------------------------
     if 'dati_storici' in st.session_state and st.session_state['dati_storici'] is not None:
         cached_profile = st.session_state.get('cached_profile', None)
@@ -1401,6 +1400,10 @@ with col3:
             text_color = "#333"
             risk_label = "RISK VERDICT: UNKNOWN STATUS"
             
+            # Se mancano i dati fondamentali, lo stato rimane UNKNOWN (Grigio spento neutro)
+            if sec_data.get('cash_on_hand') == ' - ':
+                risk_status = "UNKNOWN"
+            
             if risk_status == "RED":
                 bg_color = "#ffebee"
                 border_color = "#d32f2f"
@@ -1416,32 +1419,97 @@ with col3:
                 border_color = "#388e3c"
                 text_color = "#2e7d32"
                 risk_label = f"✅ RISK STATUS: LOW DILUTION RISK"
+            elif risk_status == "UNKNOWN":
+                bg_color = "#f9f9f9"
+                border_color = "#ccc"
+                text_color = "#333"
+                risk_label = "RISK STATUS: UNKNOWN (LACK OF SEC DATA)"
                 
             # Stampa il Badge Grafico in alto (Stringa piatta per evitare box grigi)
             risk_badge_html = f'<div style="background-color: {bg_color}; border-left: 5px solid {border_color}; padding: 12px; margin-top: 15px; margin-bottom: 20px; border-radius: 4px;"><span style="color: {text_color}; font-size: 15px; font-weight: bold;">{risk_label}</span><br><span style="color: #37474f; font-size: 12px;">Analisi basata sulla runway trimestrale dei dati SEC e sul monitoraggio delle registrazioni di offering pendenti.</span></div>'
             st.markdown(risk_badge_html, unsafe_allow_html=True)
             
-            # 2. Visualizzazione Grafica delle Metrics (Autonomia, Cassa, Burn) affiancate
-            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-bottom: 10px;'>📊 AUTONOMIA DI CASSA (CASH RUNWAY)</div>", unsafe_allow_html=True)
-            met1, met2, met3 = st.columns(3)
-            with met1:
-                st.metric(label="Cash on Hand (Cassa)", value=sec_data.get('cash_on_hand', ' - '), help="Ultima cassa liquida registrata nel report SEC.")
-            with met2:
-                st.metric(label="Monthly Burn (Spesa)", value=sec_data.get('monthly_burn', ' - '), help="Velocità di bruciatura cassa stimata su base mensile.")
-            with met3:
-                st.metric(label="Autonomia Runway", value=sec_data.get('runway_months', ' - '), help="Mesi di autonomia stimati prima dell'esaurimento completo della cassa.")
+            # Determinazione dei colori per le metriche in base alle soglie di Luca
+            runway_val_str = sec_data.get('runway_months', ' - ')
+            runway_color = "#333"
+            try:
+                if runway_val_str == "Cash Flow +":
+                    runway_color = "#2e7d32" # Verde
+                else:
+                    r_val = float(runway_val_str.split()[0])
+                    if r_val < 3.0:
+                        runway_color = "#c62828" # Rosso (Sotto i 3 mesi)
+                    elif r_val < 12.0:
+                        runway_color = "#f57f17" # Arancione (Tra 3 e 12 mesi)
+                    else:
+                        runway_color = "#2e7d32" # Verde (Sopra i 12 mesi)
+            except:
+                pass
                 
-            # 2b. Visualizzazione Grafica delle Nuove Metriche di Solvibilità Richieste
-            st.write("")
-            met4, met5 = st.columns(2)
-            with met4:
-                st.metric(label="Cash / Current Assets Ratio %", value=sec_data.get('current_assets_ratio', ' - '), help="Indica quanta parte delle attività correnti della società è composta da cassa liquida reale.")
-            with met5:
-                st.metric(label="Liquidity Test Ratio", value=sec_data.get('liquidity_test', ' - '), help="Cassa liquida divisa per le passività correnti (debiti entro l'anno). Sotto 1.2 o 1.5 indica alto rischio di insolvenza e diluizione imminente.")
+            liq_val_str = sec_data.get('liquidity_test', ' - ')
+            liq_color = "#333"
+            try:
+                l_val = float(liq_val_str)
+                if l_val < 1.2:
+                    liq_color = "#c62828" # Rosso (Sotto 1.2)
+                elif l_val < 1.5:
+                    liq_color = "#f57f17" # Arancione (Tra 1.2 e 1.5)
+                else:
+                    liq_color = "#2e7d32" # Verde (Sopra 1.5)
+            except:
+                pass
+                
+            ratio_val_str = sec_data.get('current_assets_ratio', ' - ')
+            ratio_color = "#333"
+            try:
+                rt_val = float(ratio_val_str.replace('%', ''))
+                if rt_val < 20.0:
+                    ratio_color = "#c62828" # Rosso (Cassa inferiore al 20% delle attività correnti)
+                else:
+                    ratio_color = "#2e7d32" # Verde
+            except:
+                pass
 
-            # 3. Offring attive (Badge)
-            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 25px; margin-bottom: 5px;'>⚠️ STATO REGISTRAZIONI & OFFERINGS</div>", unsafe_allow_html=True)
-            offering_box_html = f'<div style="background-color: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; font-size: 13px;"><div style="margin-bottom: 4px;"><b>Stato Offering</b>: {sec_data.get("active_offering", " - ")}</div><div><b>Dilution Alert</b>: Se l\'autonomia è inferiore a 6 mesi, la società ha altissime probabilità di diluire nel brevissimo periodo.</div></div>'
+            # 2. CARTE METRICHE COMPATTE HTML (Font ridotto a 18px per un design pulito e cockpit a schede)
+            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-bottom: 10px;'>📊 AUTONOMIA DI CASSA (CASH RUNWAY)</div>", unsafe_allow_html=True)
+            
+            # Griglia di metriche superiori (Cassa, Burn, Runway)
+            metrics_top_html = f"""
+            <div style="display: flex; gap: 10px; margin-bottom: 15px; font-family: system-ui,-apple-system; box-sizing: border-box;">
+                <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
+                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Ultima cassa liquida disponibile dichiarata nel report SEC.">Cash on Hand ℹ️</div>
+                    <div style="font-size: 18px; font-weight: bold; color: #111;">{sec_data.get('cash_on_hand', ' - ')}</div>
+                </div>
+                <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
+                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Velocità media di bruciatura mensile delle riserve liquide tra gli ultimi due trimestri.">Monthly Burn ℹ️</div>
+                    <div style="font-size: 18px; font-weight: bold; color: #111;">{sec_data.get('monthly_burn', ' - ')}</div>
+                </div>
+                <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
+                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Autonomia di cassa in mesi prima del completo esaurimento delle riserve (Sotto i 3 mesi: Rosso, Sotto i 12 mesi: Arancione, Sopra i 12: Verde).">Runway Cassa ℹ️</div>
+                    <div style="font-size: 18px; font-weight: bold; color: {runway_color};">{sec_data.get('runway_months', ' - ')}</div>
+                </div>
+            </div>
+            """
+            st.markdown(metrics_top_html, unsafe_allow_html=True)
+            
+            # Griglia di metriche inferiori di solvibilità (Ratio e Liquidity Test)
+            metrics_bottom_html = f"""
+            <div style="display: flex; gap: 10px; margin-bottom: 20px; font-family: system-ui,-apple-system; box-sizing: border-box;">
+                <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
+                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Indica quanta parte delle attività correnti dichiarate è composta da cassa liquida reale. Sotto il 20%: Rosso (attività illiquide).">Cash / Current Assets % ℹ️</div>
+                    <div style="font-size: 18px; font-weight: bold; color: {ratio_color};">{sec_data.get('current_assets_ratio', ' - ')}</div>
+                </div>
+                <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
+                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Cassa divisa per passività correnti (debiti entro l'anno). Sotto 1.2 o 1.5 indica alto rischio di insolvenza immediata e diluizione forzata (Rosso).">Liquidity Test Ratio ℹ️</div>
+                    <div style="font-size: 18px; font-weight: bold; color: {liq_color};">{sec_data.get('liquidity_test', ' - ')}</div>
+                </div>
+            </div>
+            """
+            st.markdown(metrics_bottom_html, unsafe_allow_html=True)
+            
+            # 3. Offering attive (Badge e allineamento)
+            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 15px; margin-bottom: 5px;'>⚠️ STATO REGISTRAZIONI & OFFERINGS</div>", unsafe_allow_html=True)
+            offering_box_html = f'<div style="background-color: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; font-size: 13px;"><div style="margin-bottom: 4px;"><b>Stato Offering</b>: {sec_data.get("active_offering", " - ")}</div><div><b>Dilution Alert</b>: Se l\'autonomia o il test di liquidità indicano livelli critici (Rosso), la società ha altissime probabilità di diluire a breve. Informazioni dettagliate disponibili nel tooltip ℹ️ delle schede superiori.</div></div>'
             st.markdown(offering_box_html, unsafe_allow_html=True)
             
             # 4. Tabella degli ultimi link ai depositi SEC (Link in nuove schede con stringhe piatte)
