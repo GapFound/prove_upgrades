@@ -51,12 +51,29 @@ def format_millions(val):
     except:
         return ' - '
 
-# FUNZIONE PER SCARICARE I DATI DI CASSA E RISK DILUTION DIRETTAMENTE DALLA SEC EDGAR (100% GRATUITA)
+# FUNZIONE INTERNA PER IL RECUPERO A CASCATA (FALLBACK) DEI TAG XBRL DELLA SEC (COMPRESO STANDARD IFRS / 20-F)
+def get_latest_fact(us_gaap, tags):
+    for tag in tags:
+        node = us_gaap.get(tag)
+        if node:
+            units = node.get('units', {}).get('USD', [])
+            if units:
+                # Filtra solo i report ufficiali 10-Q (trimestrali) e 10-K (annuali) per evitare duplicati
+                official = [u for u in units if u.get('form') in ['10-Q', '10-K', '20-F']]
+                if not official:
+                    official = units
+                # Ritorna il valore dell'ultimo report, il form e la lista completa
+                return float(official[-1]['val']), official[-1].get('form', '10-Q'), official
+    return None, None, None
+
+# FUNZIONE PER SCARICARE I DATI DI CASSA E RISK DILUTION DIRETTAMENTE DALLA SEC EDGAR (100% GRATUITA ED ILLIMITATA)
 def fetch_sec_data(cik):
     default_sec = {
         'cash_on_hand': ' - ',
         'monthly_burn': ' - ',
         'runway_months': ' - ',
+        'current_assets_ratio': ' - ',
+        'liquidity_test': ' - ',
         'risk_status': 'UNKNOWN',
         'active_offering': 'Nessuna offering registrata di recente',
         'sec_links': []
@@ -69,32 +86,41 @@ def fetch_sec_data(cik):
         # SEC richiede obbligatoriamente un User-Agent identificativo chiaro
         headers = {'User-Agent': 'Luca Loiacono lucaloia@gmail.com'}
         
-        # 1. Recupero dati finanziari (Company Facts) per Cash & Burn Rate
+        # 1. Recupero dati finanziari (Company Facts) per Cash & Solvibilità
         facts_url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik_str}.json"
         facts_res = requests.get(facts_url, headers=headers)
         
         cash_val = None
+        assets_val = None
+        liabilities_val = None
         monthly_burn = 0.0
         
         if facts_res.status_code == 200:
             facts = facts_res.json()
             us_gaap = facts.get('facts', {}).get('us-gaap', {})
             
-            # Troviamo la cassa liquida disponibile usando le tassonomie XBRL standard
-            cash_data = us_gaap.get('CashAndCashEquivalentsAtCarryingValue') or us_gaap.get('CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents')
-            if cash_data:
-                units = cash_data.get('units', {}).get('USD', [])
-                quarterly_units = [u for u in units if u.get('form') in ['10-Q', '10-K']]
-                if len(quarterly_units) >= 1:
-                    cash_val = float(quarterly_units[-1]['val'])
-                    
-                # Calcolo del burn rate effettivo confrontando la cassa degli ultimi due trimestri
-                if len(quarterly_units) >= 2:
-                    latest_cash = float(quarterly_units[-1]['val'])
-                    prev_cash = float(quarterly_units[-2]['val'])
-                    cash_change = prev_cash - latest_cash # Se positivo indica bruciatura di cassa
-                    if cash_change > 0:
-                        monthly_burn = cash_change / 3.0
+            # Dizionari di tag a cascata (fallback) per massima accuratezza su US-GAAP e IFRS (moduli 20-F esteri)
+            cash_tags = [
+                'CashAndCashEquivalentsAtCarryingValue',
+                'CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents',
+                'CashAndCashEquivalents',
+                'Cash',
+                'CashAndCashEquivalentsAtCarryingValueContinuingOperations'
+            ]
+            assets_tags = ['AssetsCurrent', 'CurrentAssets']
+            liabilities_tags = ['LiabilitiesCurrent', 'CurrentLiabilities']
+            
+            cash_val, cash_form, cash_units = get_latest_fact(us_gaap, cash_tags)
+            assets_val, _, _ = get_latest_fact(us_gaap, assets_tags)
+            liabilities_val, _, _ = get_latest_fact(us_gaap, liabilities_tags)
+            
+            # Calcolo del burn rate effettivo confrontando la cassa degli ultimi due report registrati
+            if cash_units and len(cash_units) >= 2:
+                latest_cash = float(cash_units[-1]['val'])
+                prev_cash = float(cash_units[-2]['val'])
+                cash_change = prev_cash - latest_cash # Se positivo indica decremento di cassa
+                if cash_change > 0:
+                    monthly_burn = cash_change / 3.0
         
         # 2. Recupero moduli depositati (Submissions) per trovare Offering attive negli ultimi 6 mesi
         sub_url = f"https://data.sec.gov/submissions/CIK{cik_str}.json"
@@ -125,7 +151,7 @@ def fetch_sec_data(cik):
                 doc = primary_docs[i]
                 sec_link = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc_no}/{doc}"
                 
-                if form_type in ["10-K", "10-Q", "S-1", "S-3", "424B3", "424B5"]:
+                if form_type in ["10-K", "10-Q", "20-F", "S-1", "S-3", "424B3", "424B5"]:
                     if links_count < 3:
                         sec_links.append({
                             'date': filing_date,
@@ -160,10 +186,28 @@ def fetch_sec_data(cik):
                 if risk_status != "RED":
                     risk_status = "GREEN"
                     
+        # Calcolo Cash / Current Assets Ratio %
+        ratio_str = " - "
+        if cash_val is not None and assets_val:
+            ratio_val = (cash_val / assets_val) * 100
+            ratio_str = f"{ratio_val:.2f}%"
+            
+        # Calcolo Liquidity Test Ratio (Cassa / Passività Correnti)
+        liq_str = " - "
+        if cash_val is not None and liabilities_val:
+            liq_val = cash_val / liabilities_val
+            liq_str = f"{liq_val:.2f}"
+            if liq_val < 1.2:
+                risk_status = "RED" # Insolvenza immediata imminente: Rischio Rosso di diluizione forzata
+            elif liq_val < 1.5 and risk_status != "RED":
+                risk_status = "YELLOW"
+                
         return {
             'cash_on_hand': format_millions(cash_val) if cash_val is not None else ' - ',
             'monthly_burn': format_millions(monthly_burn) if monthly_burn > 0 else ' - ',
             'runway_months': runway_str,
+            'current_assets_ratio': ratio_str,
+            'liquidity_test': liq_str,
             'risk_status': risk_status,
             'active_offering': active_offering,
             'sec_links': sec_links
@@ -911,6 +955,123 @@ def ricerca_gaps(nome_ticker, dati_storici, gap_perc_A, gap_perc_B, volume, prez
     else: 
         print(f' il titolo {nome_ticker} non ha nessun gap superiore o uguale al {gap_perc_A}%')
         return gaps
+        
+#%%
+
+## VISUALIZZA IL GRAFICO DEL GAP (NON PIÙ USATO MA MANTENUTO PER COMPATIBILITÀ)
+
+def visual_gap(nome_ticker, n_gap, dati_storici_ADJ):
+    global gaps
+    finestra_daily = 100
+
+    elementi_da_inizio_df = gaps.index[n_gap]
+    if elementi_da_inizio_df > round(finestra_daily/2):
+        finestra_A = round(finestra_daily/2)
+    else:
+        finestra_A = elementi_da_inizio_df
+        
+    elementi_da_fine_df = (dati_storici_ADJ.shape[0])-elementi_da_inizio_df
+    if elementi_da_fine_df > round(finestra_daily/2):
+        finestra_B = round(finestra_daily/2)
+    else:
+        finestra_B = elementi_da_fine_df
+    
+    df = dati_storici_ADJ.iloc[gaps.index[n_gap]-(finestra_A)\
+                               :gaps.index[n_gap]+(finestra_B), :].copy()
+    
+    df['hover_text'] = (
+        "Data: " + df['Date'].astype(str) + "<br>" +
+        "Open: " + df['Open'].astype(str) + "<br>" +
+        "High: " + df['High'].astype(str) + "<br>" +
+        "Low: " + df['Low'].astype(str) + "<br>" +
+        "Close: " + df['Close'].astype(str) + "<br>" +
+        "Gap %: " + df['Gap %'].astype(str) + "<br>"
+    )
+    
+    df['volume_text'] = df.apply(lambda x: f"{x['Volume']:,.0f}".replace(",", "."), axis=1)
+    df['volume_text'] = ("Volume: "+df['volume_text'].astype(str))
+    
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        row_heights=[0.8, 0.2],
+        vertical_spacing= 0.15
+    )
+    
+    fig.add_trace(
+        go.Candlestick(
+            x=df['Date'],
+            open=df['Open'],
+            high=df['High'],
+            low=df['Low'],
+            close=df['Close'],
+            name="Daily",
+            hovertext=df['hover_text'],  
+            hoverinfo="text"  
+        ),
+        row=1, col=1
+    )
+    
+    fig.add_trace(
+        go.Bar(
+            x=df['Date'],
+            y=df['Volume'],
+            name="Volume",
+            hovertext=df['volume_text'],
+            hoverinfo="text",
+            marker_color='blue',
+            opacity=0.6
+        ),
+        row=2, col=1
+    )
+    
+    if finestra_A >= 5:
+        finestra_visione_A = 5 
+    else:
+        finestra_visione_A = finestra_A-1   
+    
+    if finestra_B >= 5:
+        finestra_visione_B = 5 
+    else:
+        finestra_visione_B = finestra_B-1
+    
+    fig.update_layout(
+        title=f"          <b>{nome_ticker.upper()}</b> -  Grafico Gap del    {gaps.iloc[n_gap, 0]}",
+        yaxis_title="Prezzo",
+        xaxis_rangeslider={'thickness': 0.08, 'visible': True},
+        template="plotly_white",
+        width=800,
+        height=600,
+        shapes=[
+            {
+                'type': "rect",
+                'xref': "x",
+                'yref': "paper",
+                'x0': df['Date'].loc[gaps.index[n_gap]],
+                'x1': df['Date'].loc[gaps.index[n_gap] - 1],
+                'y0': 0.80,
+                'y1': 0.40,
+                'fillcolor': 'Orange',
+                'opacity': 0.1,
+                'layer': "below",
+                'line_width': 0
+            }
+        ]
+    )
+    
+    fig.update_xaxes(
+        range=[
+            df['Date'].loc[gaps.index[n_gap] - finestra_visione_A], 
+            df['Date'].loc[gaps.index[n_gap] + finestra_visione_B]
+        ]
+    )
+    
+    st.plotly_chart(fig, use_container_width=False, config={
+        'displayModeBar': True,  
+        'responsive': True,      
+        'scrollZoom': True,      
+        'staticPlot': False     
+    })
 
 #%%    
         
@@ -923,7 +1084,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",  
 ) 
 
-col1, col2, col3 = st.columns([0.11, 0.45, 0.44])   
+# AGGIUNTA LA COLONNA DISTANZIATRICE (SPACER_COL AL 3%) PER DECENTRARE E DARE RESPIRO GRAFICO
+col1, col2, spacer_col, col3 = st.columns([0.11, 0.46, 0.03, 0.40])   
     
 # INSERISCO il TICKER
 global nome_ticker
@@ -1174,7 +1336,7 @@ with col2:
                     </div>
                 """)
                
-           # SOTTO-COLONNE SIMMETRICHE PER CENTRARE PERFETTAMENTE IL BLOCCO DELLE NEWS SOTTO LE STATISTICHE
+           # SOTTO-COLONNE SIMMETRICHE PER CENTRARE PERFETTEMENTE IL BLOCCO DELLE NEWS SOTTO LE STATISTICHE
            col2_4, col2_5, col2_6 = st.columns([0.10, 0.80, 0.10])
           
            with col2_5: 
@@ -1208,7 +1370,7 @@ with col2:
                                if not link.startswith('http'):
                                     link = "https://finviz.com/" + b['Link']
                                         
-                               # Scritto come stringa piatta su un'unica riga per impedire la generazione di box grigi ed attivare nuove schede
+                               # USATO ST.MARKDOWN BLINDATO PER RISOLVERE ALL'ORIGINE I CONFLITTI DI APERTURA IN NUOVA SCHEDA
                                news_html += f'<div style="text-align:left; font-size:13px; margin-bottom:6px; line-height:1.3;"><strong style="color:red;">{data_da_stampa}</strong>&nbsp;<a href="{link}" style="text-decoration:none; color:inherit;" target="_blank">{b["Title"]}</a></div>'
                            
                            # STAMPATO UNICAMENTE UNA VOLTA FUORI DAL LOOP ATTRAVERSO ST.MARKDOWN
@@ -1269,7 +1431,15 @@ with col3:
             with met3:
                 st.metric(label="Autonomia Runway", value=sec_data.get('runway_months', ' - '), help="Mesi di autonomia stimati prima dell'esaurimento completo della cassa.")
                 
-            # 3. Offering attive (Badge)
+            # 2b. Visualizzazione Grafica delle Nuove Metriche di Solvibilità Richieste
+            st.write("")
+            met4, met5 = st.columns(2)
+            with met4:
+                st.metric(label="Cash / Current Assets Ratio %", value=sec_data.get('current_assets_ratio', ' - '), help="Indica quanta parte delle attività correnti della società è composta da cassa liquida reale.")
+            with met5:
+                st.metric(label="Liquidity Test Ratio", value=sec_data.get('liquidity_test', ' - '), help="Cassa liquida divisa per le passività correnti (debiti entro l'anno). Sotto 1.2 o 1.5 indica alto rischio di insolvenza e diluizione imminente.")
+
+            # 3. Offring attive (Badge)
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 25px; margin-bottom: 5px;'>⚠️ STATO REGISTRAZIONI & OFFERINGS</div>", unsafe_allow_html=True)
             offering_box_html = f'<div style="background-color: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; font-size: 13px;"><div style="margin-bottom: 4px;"><b>Stato Offering</b>: {sec_data.get("active_offering", " - ")}</div><div><b>Dilution Alert</b>: Se l\'autonomia è inferiore a 6 mesi, la società ha altissime probabilità di diluire nel brevissimo periodo.</div></div>'
             st.markdown(offering_box_html, unsafe_allow_html=True)
