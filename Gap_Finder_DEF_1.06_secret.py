@@ -94,7 +94,9 @@ def fetch_sec_data(cik):
         cash_val = None
         assets_val = None
         liabilities_val = None
-        monthly_burn = 0.0
+        monthly_burn_val = None
+        runway_str = " - "
+        risk_status = "GREEN" # Default prudente in salute se c'è cassa
         
         if facts_res.status_code == 200:
             facts = facts_res.json()
@@ -115,13 +117,33 @@ def fetch_sec_data(cik):
             assets_val, _, _ = get_latest_fact(us_gaap, assets_tags)
             liabilities_val, _, _ = get_latest_fact(us_gaap, liabilities_tags)
             
-            # Calcolo del burn rate effettivo confrontando la cassa degli ultimi due report registrati
+            if cash_val is None:
+                risk_status = "UNKNOWN"
+            
+            # Calcolo del burn rate effettivo con protezione dai dati storici mancanti (es. nuove IPO come STAK)
             if cash_units and len(cash_units) >= 2:
                 latest_cash = float(cash_units[-1]['val'])
                 prev_cash = float(cash_units[-2]['val'])
                 cash_change = prev_cash - latest_cash # Se positivo indica decremento di cassa (bruciatura)
+                
                 if cash_change > 0:
-                    monthly_burn = cash_change / 3.0
+                    monthly_burn_val = cash_change / 3.0
+                    runway_val = latest_cash / monthly_burn_val
+                    runway_str = f"{runway_val:.2f} Mesi"
+                    if runway_val < 3.0:
+                        risk_status = "RED" # Sotto i 3 mesi: Pericolo Critico Rosso
+                    elif runway_val < 12.0 and risk_status != "RED":
+                        risk_status = "YELLOW" # Tra 3 e 12 mesi: Arancione
+                else:
+                    # Cassa aumentata rispetto al trimestre precedente (Cash Flow +)
+                    monthly_burn_val = 0.0
+                    runway_str = "Cash Flow +"
+            else:
+                # Dati storici insufficienti per fare la variazione -> Nessun default a Cash Flow +
+                monthly_burn_val = None
+                runway_str = " - "
+                if cash_val is None:
+                    risk_status = "UNKNOWN"
         
         # 2. Recupero moduli depositati (Submissions) per trovare Offering attive negli ultimi 6 mesi
         sub_url = f"https://data.sec.gov/submissions/CIK{cik_str}.json"
@@ -130,7 +152,6 @@ def fetch_sec_data(cik):
         active_offering = "Nessuna offering pendente registrata di recente"
         active_offering_date = " - "
         sec_links = []
-        risk_status = "GREEN" # Default in salute
         
         if sub_res.status_code == 200:
             sub_data = sub_res.json()
@@ -173,21 +194,6 @@ def fetch_sec_data(cik):
                             found_offering = True
                     except:
                         pass
-        
-        # Calcolo finale dell'autonomia di Cassa (Runway) e gestione delle soglie di colore di Luca
-        runway_str = " - "
-        if cash_val is not None:
-            if monthly_burn > 0:
-                runway_val = cash_val / monthly_burn
-                runway_str = f"{runway_val:.2f} Mesi"
-                if runway_val < 3.0:
-                    risk_status = "RED" # Sotto i 3 mesi: Pericolo Critico Rosso
-                elif runway_val < 12.0 and risk_status != "RED":
-                    risk_status = "YELLOW" # Tra 3 e 12 mesi: Arancione
-            else:
-                runway_str = "Cash Flow +" # Se non brucia, mostra Cash Flow +
-                if risk_status != "RED":
-                    risk_status = "GREEN"
                     
         # Calcolo Cash / Current Assets Ratio %
         ratio_str = " - "
@@ -207,7 +213,7 @@ def fetch_sec_data(cik):
                 
         return {
             'cash_on_hand': format_millions(cash_val) if cash_val is not None else ' - ',
-            'monthly_burn': format_millions(monthly_burn) if monthly_burn > 0 else ' - ',
+            'monthly_burn': format_millions(monthly_burn_val) if monthly_burn_val is not None else ' - ',
             'runway_months': runway_str,
             'current_assets_ratio': ratio_str,
             'liquidity_test': liq_str,
@@ -338,7 +344,7 @@ def fetch_polygon_profile(nome_ticker):
                 "ST": "São Tomé and Príncipe", "SV": "El Salvador", "SX": "Sint Maarten", "SY": "Syria",
                 "SZ": "Eswatini", "TC": "Turks and Caicos Islands", "TD": "Chad", "TF": "French Southern Territories",
                 "TG": "Togo", "TH": "Thailand", "TJ": "Tajikistan", "TK": "Tokelau", "TL": "Timor-Leste",
-                "TM": "Turkmenistan", "TN": "Tunisia", "TO": "Tonga", "TR": "Turkey", "TT": "Trinidad and Tobago",
+                "TM": "Turkmenistan", "TN": "Turnip", "TO": "Tonga", "TR": "Turkey", "TT": "Trinidad and Tobago",
                 "TV": "Tuvalu", "TW": "Taiwan", "TZ": "Tanzania", "UA": "Ukraine", "UG": "Uganda",
                 "UM": "U.S. Outlying Islands", "US": "United States", "UY": "Uruguay", "UZ": "Uzbekistan",
                 "VA": "Vatican City", "VC": "Saint Vincent and the Grenadines", "VE": "Venezuela",
@@ -959,123 +965,6 @@ def ricerca_gaps(nome_ticker, dati_storici, gap_perc_A, gap_perc_B, volume, prez
     else: 
         print(f' il titolo {nome_ticker} non ha nessun gap superiore o uguale al {gap_perc_A}%')
         return gaps
-        
-#%%
-
-## VISUALIZZA IL GRAFICO DEL GAP (NON PIÙ USATO MA MANTENUTO PER COMPATIBILITÀ)
-
-def visual_gap(nome_ticker, n_gap, dati_storici_ADJ):
-    global gaps
-    finestra_daily = 100
-
-    elementi_da_inizio_df = gaps.index[n_gap]
-    if elementi_da_inizio_df > round(finestra_daily/2):
-        finestra_A = round(finestra_daily/2)
-    else:
-        finestra_A = elementi_da_inizio_df
-        
-    elementi_da_fine_df = (dati_storici_ADJ.shape[0])-elementi_da_inizio_df
-    if elementi_da_fine_df > round(finestra_daily/2):
-        finestra_B = round(finestra_daily/2)
-    else:
-        finestra_B = elementi_da_fine_df
-    
-    df = dati_storici_ADJ.iloc[gaps.index[n_gap]-(finestra_A)\
-                               :gaps.index[n_gap]+(finestra_B), :].copy()
-    
-    df['hover_text'] = (
-        "Data: " + df['Date'].astype(str) + "<br>" +
-        "Open: " + df['Open'].astype(str) + "<br>" +
-        "High: " + df['High'].astype(str) + "<br>" +
-        "Low: " + df['Low'].astype(str) + "<br>" +
-        "Close: " + df['Close'].astype(str) + "<br>" +
-        "Gap %: " + df['Gap %'].astype(str) + "<br>"
-    )
-    
-    df['volume_text'] = df.apply(lambda x: f"{x['Volume']:,.0f}".replace(",", "."), axis=1)
-    df['volume_text'] = ("Volume: "+df['volume_text'].astype(str))
-    
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        row_heights=[0.8, 0.2],
-        vertical_spacing= 0.15
-    )
-    
-    fig.add_trace(
-        go.Candlestick(
-            x=df['Date'],
-            open=df['Open'],
-            high=df['High'],
-            low=df['Low'],
-            close=df['Close'],
-            name="Daily",
-            hovertext=df['hover_text'],  
-            hoverinfo="text"  
-        ),
-        row=1, col=1
-    )
-    
-    fig.add_trace(
-        go.Bar(
-            x=df['Date'],
-            y=df['Volume'],
-            name="Volume",
-            hovertext=df['volume_text'],
-            hoverinfo="text",
-            marker_color='blue',
-            opacity=0.6
-        ),
-        row=2, col=1
-    )
-    
-    if finestra_A >= 5:
-        finestra_visione_A = 5 
-    else:
-        finestra_visione_A = finestra_A-1   
-    
-    if finestra_B >= 5:
-        finestra_visione_B = 5 
-    else:
-        finestra_visione_B = finestra_B-1
-    
-    fig.update_layout(
-        title=f"          <b>{nome_ticker.upper()}</b> -  Grafico Gap del    {gaps.iloc[n_gap, 0]}",
-        yaxis_title="Prezzo",
-        xaxis_rangeslider={'thickness': 0.08, 'visible': True},
-        template="plotly_white",
-        width=800,
-        height=600,
-        shapes=[
-            {
-                'type': "rect",
-                'xref': "x",
-                'yref': "paper",
-                'x0': df['Date'].loc[gaps.index[n_gap]],
-                'x1': df['Date'].loc[gaps.index[n_gap] - 1],
-                'y0': 0.80,
-                'y1': 0.40,
-                'fillcolor': 'Orange',
-                'opacity': 0.1,
-                'layer': "below",
-                'line_width': 0
-            }
-        ]
-    )
-    
-    fig.update_xaxes(
-        range=[
-            df['Date'].loc[gaps.index[n_gap] - finestra_visione_A], 
-            df['Date'].loc[gaps.index[n_gap] + finestra_visione_B]
-        ]
-    )
-    
-    st.plotly_chart(fig, use_container_width=False, config={
-        'displayModeBar': True,  
-        'responsive': True,      
-        'scrollZoom': True,      
-        'staticPlot': False     
-    })
 
 #%%    
         
@@ -1087,7 +976,8 @@ st.set_page_config(
     layout="wide",  
 ) 
 
-col1, col2, col3 = st.columns([0.11, 0.45, 0.44])   
+# INTEGRATO IL CORRIDOIO DI SPAZIATURA AL 2% RICHIESTO DA LUCA PER ALLONTANARE LA TABELLA DAL COCKPIT
+col1, col2, spacer_col, col3 = st.columns([0.11, 0.46, 0.02, 0.41])   
     
 # INSERISCO il TICKER
 global nome_ticker
@@ -1372,7 +1262,7 @@ with col2:
                                if not link.startswith('http'):
                                     link = "https://finviz.com/" + b['Link']
                                         
-                               # Scritto come stringa piatta su un'unica riga per impedire la generazione di box grigi ed attivare nuove schede
+                               # USATO ST.MARKDOWN BLINDATO PER RISOLVERE ALL'ORIGINE I CONFLITTI DI APERTURA IN NUOVA SCHEDA
                                news_html += f'<div style="text-align:left; font-size:13px; margin-bottom:6px; line-height:1.3;"><strong style="color:red;">{data_da_stampa}</strong>&nbsp;<a href="{link}" style="text-decoration:none; color:inherit;" target="_blank">{b["Title"]}</a></div>'
                            
                            # STAMPATO UNICAMENTE UNA VOLTA FUORI DAL LOOP ATTRAVERSO ST.MARKDOWN
@@ -1419,14 +1309,15 @@ with col3:
             else:
                 if offering_date_str and str(offering_date_str).strip() not in ['', '-', ' - ']:
                     try:
-                        off_date = datetime.strptime(offering_date_str, "%Y-%m-%d").date()
+                        # CONVERSIONE BLINDATA TRAMITE PD.TO_DATETIME PER PREVENIRE TYPEERROR DI PANDAS
+                        off_date_dt = pd.to_datetime(offering_date_str)
                         
                         # Filtriamo i dati storici dei gapper per trovare quelli successivi al deposito dell'offering
                         df_hist = st.session_state['dati_storici'].copy()
-                        df_hist['Date'] = pd.to_datetime(df_hist['Date']).dt.date
+                        df_hist['Date_dt'] = pd.to_datetime(df_hist['Date'])
                         
                         # Definiamo i gap storici usando la soglia standard del 30%
-                        gaps_after = df_hist[(df_hist['Date'] > off_date) & (df_hist['Gap %'] >= 30.0)]
+                        gaps_after = df_hist[(df_hist['Date_dt'] > off_date_dt) & (df_hist['Gap %'] >= 30.0)]
                         
                         if gaps_after.empty:
                             short_edge = "CRITICAL"
@@ -1456,6 +1347,7 @@ with col3:
                         edge_msg = "SHORT EDGE BASSO — Nessuna offering recente rilevata e cassa solida (flusso di cassa positivo)."
                     else:
                         try:
+                            # Converte in float l'autonomia escludendo la parola 'Mesi'
                             r_val = float(raw_runway.split()[0])
                             if r_val < 3.0:
                                 short_edge = "CRITICAL"
