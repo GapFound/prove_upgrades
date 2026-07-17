@@ -1372,31 +1372,16 @@ with col2:
                                if not link.startswith('http'):
                                     link = "https://finviz.com/" + b['Link']
                                         
-                               # USATO ST.MARKDOWN BLINDATO PER RISOLVERE ALL'ORIGINE I CONFLITTI DI APERTURA IN NUOVA SCHEDA
+                               # Scritto come stringa piatta su un'unica riga per impedire la generazione di box grigi ed attivare nuove schede
                                news_html += f'<div style="text-align:left; font-size:13px; margin-bottom:6px; line-height:1.3;"><strong style="color:red;">{data_da_stampa}</strong>&nbsp;<a href="{link}" style="text-decoration:none; color:inherit;" target="_blank">{b["Title"]}</a></div>'
                            
-                           # STAMPATO UNICAMENTE UNA VOLTA FUORI DAL LOOP ATTRAVERSO ST.MARKDOWN
+                           # STAMPATO UNICAMENTE UNA VOLTA FUOI DAL LOOP ATTRAVERSO ST.MARKDOWN
                            st.markdown(news_html, unsafe_allow_html=True)
 
                    if isinstance(st.session_state['news'], str):
                            # USATO ST.MARKDOWN PROTETTO CON STRINGA PIATTA
                            news_str_html = f'<div style="text-align:center; font-size:14px;">{st.session_state["news"]}</div>'
                            st.markdown(news_str_html, unsafe_allow_html=True)
-
-Ecco il blocco di codice corretto da sostituire all'interno della colonna 3
-(col3).
-
-Ho implementato l'estrazione dinamica della data direttamente dalla stringa
-'active_offering' (risolvendo il bug della cache di VEEE) [1.1.1], sbloccato la
-colorazione verde del Cash Flow + per AAPL [2.1], ed impostato i messaggi esatti
-dell'opportunità short basati sulle giornate e chiusure dei gap [2.1].
-
-Cosa sostituire nel tuo file:
-
-Trova la sezione with col3: (intorno alla riga 790 in fondo al file su GitHub) e
-sostituisci tutto ciò che c'è sotto quel blocco fino alla fine del file con
-questo codice corretto:
-
 
 with col3:
     # ---------------------------------------------------------------------------------
@@ -1411,12 +1396,8 @@ with col3:
             sec_data = cached_profile.get('sec_data')
             
         if isinstance(sec_data, dict):
-            # ESTRAZIONE DINAMICA DELLA DATA DALLA STRINGA PER EVITARE CONFLITTI DI CACHE
-            active_offering_str = sec_data.get('active_offering', ' - ')
-            offering_date_str = None
-            if "depositato il" in active_offering_str:
-                offering_date_str = active_offering_str.split("depositato il")[-1].strip()
-                
+            # ANALISI CRONOLOGICA DI DIGESTIONE DELL'OFFERING RISPETTO AI GAP REALI (SHORT EDGE DI LUCA)
+            offering_date_str = sec_data.get('active_offering_date')
             short_edge = "UNKNOWN"
             edge_msg = "Analisi basata sulla runway trimestrale dei dati SEC e sul monitoraggio delle registrazioni di offering pendenti."
             
@@ -1472,10 +1453,10 @@ with col3:
                             r_val = float(raw_runway.split()[0])
                             if r_val < 3.0:
                                 short_edge = "CRITICAL"
-                                edge_msg = f"SHORT EDGE CRITICO (Opportunità Massima) — Nessuna offering recente, ma autonomia inferiore a 3 mesi."
+                                edge_msg = f"SHORT EDGE CRITICO (Cassa in esaurimento) — Nessuna offering recente, ma autonomia inferiore a 3 mesi."
                             elif r_val < 12.0:
                                 short_edge = "HIGH"
-                                edge_msg = f"SHORT EDGE ALTO (Opportunità Forte) — Nessuna offering recente, ma autonomia inferiore a 12 mesi."
+                                edge_msg = f"SHORT EDGE ALTO (Autonomia limitata) — Nessuna offering recente, ma autonomia inferiore a 12 mesi."
                             else:
                                 short_edge = "LOW"
                                 edge_msg = "SHORT EDGE BASSO — Nessuna offering recente e cassa sicura (oltre 12 mesi di autonomia)."
@@ -1587,7 +1568,7 @@ with col3:
             """
             st.markdown(metrics_bottom_html, unsafe_allow_html=True)
             
-            # 3. Offring attive (Badge e allineamento) con il remind spostato elegantemente nell'help tooltip di st.markdown
+            # 3. Offering attive (Badge e allineamento) con il remind spostato elegantemente nell'help tooltip di st.markdown
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 15px; margin-bottom: 5px;'>⚠️ STATO REGISTRAZIONI & OFFERINGS</div>", unsafe_allow_html=True)
             offering_box_html = f'<div style="background-color: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; font-size: 13px;" title="Dilution Alert: Se l\'autonomia della cassa o il test di liquidità indicano livelli critici (Rosso), la società ha altissime probabilità di diluire nel brevissimo periodo per far fronte alle passività correnti."><div style="margin-bottom: 4px;"><b>Stato Offering ℹ️</b>: {sec_data.get("active_offering", " - ")}</div><div>Passa il mouse per visualizzare il Dilution Alert sulla solvibilità della società.</div></div>'
             st.markdown(offering_box_html, unsafe_allow_html=True)
@@ -1630,6 +1611,3 @@ st.markdown("""
         <a href="https://GapFound.github.io/GAP_Finder_dipendent_files/disclaimer.html" target="_blank">Data Disclaimer</a>
     </div>
 """, unsafe_allow_html=True)
-
-Fai subito il commit di questo blocco modificato, salva ed esegui. Risolverà sia
-lo stato di AAPL sia la scomposizione cronologica dei gap per VEEE a schermo.
