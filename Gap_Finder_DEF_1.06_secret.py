@@ -25,7 +25,6 @@ import streamlit.components.v1 as components
 import pickle
 import os
 import sys
-import textwrap
 
 # INIZIALIZZAZIONE DELLA SESSIONE GLOBALE PER EVITARE I BLOCCHI DI YAHOO FINANCE
 session = requests.Session()
@@ -51,7 +50,7 @@ def format_millions(val):
     except:
         return ' - '
 
-# FUNZIONE PER SCARICARE I DATI DI CASSA E RISK DILUTION DIRETTAMENTE DALLA SEC EDGAR (100% GRATUITA ED ILLIMITATA)
+# FUNZIONE PER SCARICARE I DATI DI CASSA E RISK DILUTION DIRETTAMENTE DALLA SEC EDGAR
 def fetch_sec_data(cik):
     default_sec = {
         'cash_on_hand': ' - ',
@@ -318,6 +317,153 @@ def fetch_polygon_profile(nome_ticker):
         
     return default_profile
 
+# FUNZIONE PERSONALIZZATA PER LA BARRA DI SCROLL ORIZZONTALE SULLE TABELLE
+def render_table_with_slider(
+    df,
+    min_rows: int = 6,
+    max_rows: int = 24,
+    row_px: int = 26,
+    header_px: int = 34,
+    padding_px: int = 14,
+    key: str = "tbl",
+    escape: bool = True,
+):
+    try:
+        df2 = df.copy()
+        df2.index = range(1, len(df2) + 1)
+        df2.index.name = ""
+    except Exception:
+        df2 = df
+
+    html_table = df2.to_html(border=0, classes="gf-table", index=True, escape=escape)
+
+    rows = int(df2.shape[0])
+    target_rows = max(min_rows, min(rows, max_rows))
+    scroller_h = header_px + row_px * target_rows + padding_px
+    component_h = scroller_h + 36
+
+    html = f"""
+    <div id="gf-wrap-{key}" style="
+      position:relative; z-index:2147483000;
+      width:100%; max-width:100%;
+      box-sizing:border-box; overflow:visible;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
+
+      <div id="gf-scroller-{key}" style="
+        overflow-y:auto; overflow-x:hidden;
+        border:1px solid #ddd; height:{scroller_h}px;
+        width:100%; max-width:100%; box-sizing:border-box;
+        padding-bottom:2px; padding-right:2px;">
+        <div id="gf-content-{key}">
+          {html_table}
+        </div>
+      </div>
+
+      <div id="gf-slider-wrap-{key}" class="gf-slider">
+        <div class="gf-track"></div>
+        <div id="gf-fill-{key}" class="gf-fill"></div>
+        <div id="gf-handle-{key}" class="gf-handle"></div>
+        <input id="gf-range-{key}" class="gf-range-ghost" type="range" min="0" max="1000" value="0">
+      </div>
+    </div>
+
+    <style>
+      #gf-wrap-{key} table {{
+        border-collapse: separate; border-spacing:0;
+        width: max-content;
+        max-width: calc(100% - 4px);
+        font-size:11.5px;
+      }}
+      #gf-wrap-{key} th, #gf-wrap-{key} td {{
+        padding:6px 4.6px;
+        white-space:nowrap;
+        border-bottom:1px solid #eee;
+        border-right:1px solid #eee;
+      }}
+      #gf-wrap-{key} th:last-child, #gf-wrap-{key} td:last-child {{ border-right:none; }}
+      #gf-wrap-{key} thead th {{
+        position: sticky; top: 0;
+        background:#fafafa; z-index:1;
+      }}
+      #gf-wrap-{key} thead th:first-child,
+      #gf-wrap-{key} tbody td:first-child {{
+        text-align:center;
+        width:26px; min-width:26px; max-width:26px;
+        color:#444;
+      }}
+      #gf-scroller-{key} {{
+        -ms-overflow-style: none;        
+        scrollbar-width: none;           
+      }}
+      #gf-scroller-{key}::-webkit-scrollbar:horizontal {{ height:0px; display:none; }}  
+
+      .gf-slider {{ position:relative; height:34px; margin-top:2px; z-index:2147483200; overflow:visible; }}
+      .gf-track  {{ position:absolute; left:10px; right:10px; top:40%; height:3px; background:#e5e7eb; transform:translateY(-50%); border-radius:2px; z-index:1; }}
+      .gf-fill   {{ position:absolute; left:10px; top:40%; height:3px; background:#d00; transform:translateY(-50%); border-radius:2px; width:0px; z-index:2; }}
+      .gf-handle {{ position:absolute; top:40%; width:12px; height:12px; background:#d00; border:2px solid #fff; border-radius:50%; transform:translate(-50%,-50%); left:10px; box-shadow:0 0 0 1px rgba(0,0,0,.15); cursor:grab; z-index:2147483400; }}
+      .gf-handle:active {{ cursor:grabbing; }}
+      .gf-range-ghost {{ position:absolute; left:0; right:0; top:0; bottom:0; width:100%; height:100%; opacity:0; cursor:ew-resize; z-index:2147483300; }}
+    </style>
+
+    <script>
+      const scroller  = document.getElementById("gf-scroller-{key}");
+      const content   = document.getElementById("gf-content-{key}");
+      const rangeEl   = document.getElementById("gf-range-{key}");
+      const fillEl    = document.getElementById("gf-fill-{key}");
+      const handleEl  = document.getElementById("gf-handle-{key}");
+      const sliderBox = document.getElementById("gf-slider-wrap-{key}");
+      const PADDING = 10;
+
+      function maxScrollX() {{ return Math.max(0, content.scrollWidth - scroller.clientWidth); }}
+      function usableWidth() {{ return Math.max(0, sliderBox.clientWidth - 2*PADDING); }}
+
+      function applyPct(pct) {{
+        const W = usableWidth();
+        const x = PADDING + (pct/100) * W;
+        fillEl.style.width = (x - PADDING) + "px";
+        handleEl.style.left = x + "px";
+      }}
+
+      function syncSliderFromScroll() {{
+        const m = maxScrollX();
+        if (m <= 0) {{ rangeEl.disabled = true; applyPct(0); return; }}
+        rangeEl.disabled = false;
+        const pct = (scroller.scrollLeft / m) * 100;
+        rangeEl.value = Math.round((pct/100) * 1000);
+        applyPct(pct);
+      }}
+
+      function syncScrollFromSlider() {{
+        const m = maxScrollX();
+        const pct = (rangeEl.value / 1000) * 100;
+        scroller.scrollLeft = (pct/100) * m;   
+        applyPct(pct);
+      }}
+
+      let dragging = false;
+      handleEl.addEventListener("mousedown", () => dragging = true);
+      window.addEventListener("mouseup",   () => dragging = false);
+      window.addEventListener("mousemove", (e) => {{
+        if (!dragging) return;
+        const rect = sliderBox.getBoundingClientRect();
+        let x = Math.min(Math.max(e.clientX - rect.left, PADDING), rect.width - PADDING);
+        const pct = ((x - PADDING) / (rect.width - 2*PADDING)) * 100;
+        rangeEl.value = Math.round((pct/100) * 1000);
+        syncScrollFromSlider();
+      }});
+
+      scroller.addEventListener("scroll", syncSliderFromScroll);
+      rangeEl.addEventListener("input",  syncScrollFromSlider);
+      rangeEl.addEventListener("change", syncScrollFromSlider);
+
+      new ResizeObserver(syncSliderFromScroll).observe(content);
+      new ResizeObserver(syncSliderFromScroll).observe(sliderBox);
+      window.addEventListener("load", syncSliderFromScroll);
+      setTimeout(syncSliderFromScroll, 120);
+    </script>
+    """
+    components.html(html, height=component_h, scrolling=False)
+
 #%%
 
 # QUESTO BLOCCO CARICA I DATI DA YAHOO FINANCE E POI ELABORA IL DF DATI_STORICI
@@ -572,7 +718,7 @@ def datagathering_func(nome_ticker):
         
     if os.path.exists(cache_file):
           with open(cache_file, "rb") as fp:
-              print(f"Caricamento dati daily, splits, profilo e SEC {nome_ticker} dalla cache.")
+              print(f"Caricamento dati daily, splits e profilo {nome_ticker} dalla cache.")
               cache_data = pickle.load(fp)
               dati_storici = cache_data['dati_storici']
               splits_format = cache_data['splits']
@@ -580,15 +726,10 @@ def datagathering_func(nome_ticker):
               
               profile_data = cache_data.get('profile', None)
               
-              # LAZY-LOAD INTELLIGENTE: Se il profilo o i dati SEC mancano nel vecchio file .pkl, lo scarichiamo una volta sola e ri-salviamo il file .pkl
-              if (profile_data is None or 'sec_data' not in profile_data) and not dati_storici.empty:
-                  print("Profilo o dati SEC mancanti nella vecchia cache. Eseguo lazy-load da Massive/Polygon e SEC.")
-                  if profile_data is None:
-                      profile_data = fetch_polygon_profile(nome_ticker)
-                  # Scarica i dati finanziari SEC usando il CIK in sicurezza
-                  sec_metrics = fetch_sec_data(profile_data.get('cik', ''))
-                  profile_data['sec_data'] = sec_metrics
-                  
+              # LAZY-LOAD INTELLIGENTE: Se il profilo manca nel vecchio file .pkl, lo scarichiamo una volta sola e ri-salviamo il file .pkl
+              if profile_data is None and not dati_storici.empty:
+                  print("Profilo mancante nella vecchia cache. Eseguo lazy-load da Massive/Polygon.")
+                  profile_data = fetch_polygon_profile(nome_ticker)
                   try:
                       cache_data['profile'] = profile_data
                       with open(cache_file, 'wb') as out_fp:
@@ -600,15 +741,9 @@ def datagathering_func(nome_ticker):
               caricato = 1
    
     if caricato == 0:
-        # Ticker totalmente nuovo: scarichiamo il profilo da MASSIVE/Polygon ed i dati SEC una sola volta e lo scriviamo in cache
+        # Ticker totalmente nuovo: scarichiamo il profilo da MASSIVE/Polygon una volta sola e lo scriviamo in cache
         print("Nuovo Ticker. Scarico il profilo da Massive/Polygon.")
         fmp_profile = fetch_polygon_profile(nome_ticker)
-        
-        # Scarica i dati finanziari SEC usando il CIK in sicurezza
-        print("Scarico i dati di cassa e diluizione reali da SEC EDGAR.")
-        sec_metrics = fetch_sec_data(fmp_profile.get('cik', ''))
-        fmp_profile['sec_data'] = sec_metrics
-        
         st.session_state['cached_profile'] = fmp_profile
         
         try:     
@@ -659,13 +794,12 @@ def datagathering_func(nome_ticker):
                     '4. close': 'Close',
                     '5. volume': 'Volume'}, inplace=True)
                 
-                # SPOSTATA DEFINITIVAMENTE LA CONVERSIONE NUMERICA DENTRO LA PROTEZIONE DI SICUREZZA PER PREVENIRE IL KEYERROR
-                cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-                dati_storici[cols] = dati_storici[cols].apply(pd.to_numeric, errors='coerce')
-                dati_storici.sort_index(ascending=True, inplace=True) 
-                
             print('prima delle trasformazioni')
-            print(dati_storici[:5].to_string() if not dati_storici.empty else "Dati vuoti")
+            print(dati_storici[:5].to_string())
+            
+            cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            dati_storici[cols] = dati_storici[cols].apply(pd.to_numeric, errors='coerce')
+            dati_storici.sort_index(ascending=True, inplace=True) 
             
         if not dati_storici.empty:    
              dati_storici.index = pd.to_datetime(dati_storici.index).normalize()
@@ -764,6 +898,123 @@ def ricerca_gaps(nome_ticker, dati_storici, gap_perc_A, gap_perc_B, volume, prez
     else: 
         print(f' il titolo {nome_ticker} non ha nessun gap superiore o uguale al {gap_perc_A}%')
         return gaps
+        
+#%%
+
+## VISUALIZZA IL GRAFICO DEL GAP
+
+def visual_gap(nome_ticker, n_gap, dati_storici_ADJ):
+    global gaps
+    finestra_daily = 100
+
+    elementi_da_inizio_df = gaps.index[n_gap]
+    if elementi_da_inizio_df > round(finestra_daily/2):
+        finestra_A = round(finestra_daily/2)
+    else:
+        finestra_A = elementi_da_inizio_df
+        
+    elementi_da_fine_df = (dati_storici_ADJ.shape[0])-elementi_da_inizio_df
+    if elementi_da_fine_df > round(finestra_daily/2):
+        finestra_B = round(finestra_daily/2)
+    else:
+        finestra_B = elementi_da_fine_df
+    
+    df = dati_storici_ADJ.iloc[gaps.index[n_gap]-(finestra_A)\
+                               :gaps.index[n_gap]+(finestra_B), :].copy()
+    
+    df['hover_text'] = (
+        "Data: " + df['Date'].astype(str) + "<br>" +
+        "Open: " + df['Open'].astype(str) + "<br>" +
+        "High: " + df['High'].astype(str) + "<br>" +
+        "Low: " + df['Low'].astype(str) + "<br>" +
+        "Close: " + df['Close'].astype(str) + "<br>" +
+        "Gap %: " + df['Gap %'].astype(str) + "<br>"
+    )
+    
+    df['volume_text'] = df.apply(lambda x: f"{x['Volume']:,.0f}".replace(",", "."), axis=1)
+    df['volume_text'] = ("Volume: "+df['volume_text'].astype(str))
+    
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        row_heights=[0.8, 0.2],
+        vertical_spacing= 0.15
+    )
+    
+    fig.add_trace(
+        go.Candlestick(
+            x=df['Date'],
+            open=df['Open'],
+            high=df['High'],
+            low=df['Low'],
+            close=df['Close'],
+            name="Daily",
+            hovertext=df['hover_text'],  
+            hoverinfo="text"  
+        ),
+        row=1, col=1
+    )
+    
+    fig.add_trace(
+        go.Bar(
+            x=df['Date'],
+            y=df['Volume'],
+            name="Volume",
+            hovertext=df['volume_text'],
+            hoverinfo="text",
+            marker_color='blue',
+            opacity=0.6
+        ),
+        row=2, col=1
+    )
+    
+    if finestra_A >= 5:
+        finestra_visione_A = 5 
+    else:
+        finestra_visione_A = finestra_A-1   
+    
+    if finestra_B >= 5:
+        finestra_visione_B = 5 
+    else:
+        finestra_visione_B = finestra_B-1
+    
+    fig.update_layout(
+        title=f"          <b>{nome_ticker.upper()}</b> -  Grafico Gap del    {gaps.iloc[n_gap, 0]}",
+        yaxis_title="Prezzo",
+        xaxis_rangeslider={'thickness': 0.08, 'visible': True},
+        template="plotly_white",
+        width=800,
+        height=600,
+        shapes=[
+            {
+                'type': "rect",
+                'xref': "x",
+                'yref': "paper",
+                'x0': df['Date'].loc[gaps.index[n_gap]],
+                'x1': df['Date'].loc[gaps.index[n_gap] - 1],
+                'y0': 0.80,
+                'y1': 0.40,
+                'fillcolor': 'Orange',
+                'opacity': 0.1,
+                'layer': "below",
+                'line_width': 0
+            }
+        ]
+    )
+    
+    fig.update_xaxes(
+        range=[
+            df['Date'].loc[gaps.index[n_gap] - finestra_visione_A], 
+            df['Date'].loc[gaps.index[n_gap] + finestra_visione_B]
+        ]
+    )
+    
+    st.plotly_chart(fig, use_container_width=False, config={
+        'displayModeBar': True,  
+        'responsive': True,      
+        'scrollZoom': True,      
+        'staticPlot': False     
+    })
 
 #%%    
         
@@ -931,15 +1182,19 @@ with col1:
             else:
                 ticker_html = f"{nome_ticker.upper()}"
 
-            # ST.MARKDOWN BLINDATO: Stringhe piatte concatenate (senza andare a capo) per impedire a Streamlit di creare box grigi e consentire nuove schede
-            ticker_info_html = (
-                f'<div style="font-size: 22px; font-weight: bold; margin-bottom: 0px; line-height: 1.1;">{ticker_html}</div>'
-                f'<div style="font-size: 13.5px; font-weight: bold; color: #d00; margin-bottom: 8px;">{st.session_state.get("nationality_exchange", {}).get("nation_full", " - ")}</div>'
-                f'<div style="font-size: 12px; margin-bottom: 5px;"><b>{st.session_state.get("nationality_exchange", {}).get("nation", " - ")} - {st.session_state.get("nationality_exchange", {}).get("exchange", " - ")}</b></div>'
-                f'<div style="font-size: 13px; font-weight: normal; color: #444;">{st.session_state.get("sector_industry", {}).get("sector", " - ")}</div>'
-                f'<div style="font-size: 13px; font-weight: normal; color: #444;">{st.session_state.get("sector_industry", {}).get("industry", " - ")}</div>'
-            )
-            st.markdown(ticker_info_html, unsafe_allow_html=True)
+            # ST.HTML CARICA DIRETTAMENTE EXCHANGE, SETTORE E INDUSTRIA DA MASSIVE/POLYGON SENZA RIPETIZIONI (CON PAESE IN ROSSO)
+            st.html(f"""
+                <div style="font-size: 22px; font-weight: bold; margin-bottom: 2px;">
+                    {ticker_html}
+                </div>
+                <div style="font-size: 12px;"><b>{st.session_state['nationality_exchange']['nation']} - {st.session_state['nationality_exchange']['exchange']}</b></div>
+                <div style="font-size: 13px; font-weight: normal; color: #444;">
+                    {st.session_state['sector_industry']['sector']}
+                </div>
+                <div style="font-size: 13px; font-weight: normal; color: #444;">
+                    {st.session_state['sector_industry']['industry']}
+                </div>
+            """)
 
             st.table(st.session_state['fondamentali'])
             print(st.session_state['fondamentali'])
@@ -1061,104 +1316,44 @@ with col2:
                                if not link.startswith('http'):
                                     link = "https://finviz.com/" + b['Link']
                                         
-                               # Scritto come stringa piatta su un'unica riga per impedire la generazione di box grigi ed attivare nuove schede
-                               news_html += f'<div style="text-align:left; font-size:13px; margin-bottom:6px; line-height:1.3;"><strong style="color:red;">{data_da_stampa}</strong>&nbsp;<a href="{link}" style="text-decoration:none; color:inherit;" target="_blank">{b["Title"]}</a></div>'
+                               # USATO ST.HTML CHE RISOLVE ALL'ORIGINE I BOX GRIGI
+                               news_html += f"""
+                                    <div style="text-align:left; font-size: 13px; margin-bottom: 6px; line-height: 1.3;">
+                                        <strong style="color: red;">{data_da_stampa}</strong>&nbsp;
+                                        <a href="{link}" style="text-decoration: none; color: inherit;">
+                                            {b['Title']}
+                                        </a>
+                                    </div>
+                               """
                            
                            # STAMPATO UNICAMENTE UNA VOLTA FUORI DAL LOOP ATTRAVERSO ST.MARKDOWN
-                           st.markdown(news_html, unsafe_allow_html=True)
+                           st.html(news_html)
 
                    if isinstance(st.session_state['news'], str):
-                           # USATO ST.MARKDOWN PROTETTO CON STRINGA PIATTA
-                           news_str_html = f'<div style="text-align:center; font-size:14px;">{st.session_state["news"]}</div>'
-                           st.markdown(news_str_html, unsafe_allow_html=True)
-
-with col3:
-    # ---------------------------------------------------------------------------------
-    # LA PARTE DESTRA (COL3) DIVENTA ORA IL COCKPIT GRAFICO DI ANALISI DILUIZIONE & RISK SEC
-    # ---------------------------------------------------------------------------------
-    if 'dati_storici' in st.session_state and st.session_state['dati_storici'] is not None:
-        cached_profile = st.session_state.get('cached_profile', None)
-        sec_data = None
-        
-        # Recuperiamo i dati SEC normalizzati salvati all'interno della cache locale
-        if isinstance(cached_profile, dict):
-            sec_data = cached_profile.get('sec_data')
-            
-        if isinstance(sec_data, dict):
-            # 1. Box Grafico di Rischio in alto (con colori dinamici)
-            risk_status = sec_data.get('risk_status', 'UNKNOWN')
-            bg_color = "#f9f9f9"
-            border_color = "#ccc"
-            text_color = "#333"
-            risk_label = "RISK VERDICT: UNKNOWN STATUS"
-            
-            if risk_status == "RED":
-                bg_color = "#ffebee"
-                border_color = "#d32f2f"
-                text_color = "#c62828"
-                risk_label = f"🚨 RISK STATUS: CRITICAL DILUTION RISK"
-            elif risk_status == "YELLOW":
-                bg_color = "#fffde7"
-                border_color = "#fbc02d"
-                text_color = "#f57f17"
-                risk_label = f"⚠️ RISK STATUS: MEDIUM DILUTION RISK"
-            elif risk_status == "GREEN":
-                bg_color = "#e8f5e9"
-                border_color = "#388e3c"
-                text_color = "#2e7d32"
-                risk_label = f"✅ RISK STATUS: LOW DILUTION RISK"
-                
-            # Stampa il Badge Grafico in alto
-            st.html(f"""
-                <div style="background-color: {bg_color}; border-left: 5px solid {border_color}; padding: 12px; margin-top: 15px; margin-bottom: 20px; border-radius: 4px;">
-                    <span style="color: {text_color}; font-size: 15px; font-weight: bold;">{risk_label}</span><br>
-                    <span style="color: #37474f; font-size: 12px;">Analisi basata sulla runway trimestrale dei dati SEC e sul monitoraggio delle registrazioni di offering pendenti.</span>
-                </div>
-            """)
-            
-            # 2. Visualizzazione Grafica delle Metrics (Autonomia, Cassa, Burn) affiancate
-            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-bottom: 10px;'>📊 AUTONOMIA DI CASSA (CASH RUNWAY)</div>", unsafe_allow_html=True)
-            met1, met2, met3 = st.columns(3)
-            with met1:
-                st.metric(label="Cash on Hand (Cassa)", value=sec_data.get('cash_on_hand', ' - '), help="Ultima cassa liquida registrata nel report SEC.")
-            with met2:
-                st.metric(label="Monthly Burn (Spesa)", value=sec_data.get('monthly_burn', ' - '), help="Velocità di bruciatura cassa stimata su base mensile.")
-            with met3:
-                st.metric(label="Autonomia Runway", value=sec_data.get('runway_months', ' - '), help="Mesi di autonomia stimati prima dell'esaurimento completo della cassa.")
-                
-            # 3. Offring attive (Badge)
-            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 25px; margin-bottom: 5px;'>⚠️ STATO REGISTRAZIONI & OFFERINGS</div>", unsafe_allow_html=True)
-            st.html(f"""
-                <div style="background-color: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; font-size: 13px;">
-                    <div style="margin-bottom: 4px;"><b>Stato Offering</b>: {sec_data.get('active_offering', ' - ')}</div>
-                    <div><b>Dilution Alert</b>: Se l'autonomia è inferiore a 6 mesi, la società ha altissime probabilità di diluire nel brevissimo periodo.</div>
-                </div>
-            """)
-            
-            # 4. Tabella degli ultimi link ai depositi SEC (Link in nuove schede)
-            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 25px; margin-bottom: 8px;'>📂 ULTIMI DEPOSITI SEC EDGAR RILEVANTI</div>", unsafe_allow_html=True)
-            sec_links = sec_data.get('sec_links', [])
-            if sec_links:
-                sec_html = ""
-                for item in sec_links:
-                    sec_html += f"""
-                        <div style="font-size: 13px; margin-bottom: 5px; padding-bottom: 5px; border-bottom: 1px solid #f9f9f9;">
-                            <span style="color: #666;">[{item['date']}]</span>&nbsp;&nbsp;
-                            <strong style="color: #d00;">Form {item['form']}</strong>&nbsp;&nbsp;—&nbsp;&nbsp;
-                            <a href="{item['link']}" style="text-decoration: none; color: blue; font-weight: bold;" target="_blank">Apri Deposito su SEC 🔗</a>
-                        </div>
-                    """
-                st.markdown(textwrap.dedent(sec_html), unsafe_allow_html=True)
-            else:
-                st.write("Nessun deposito SEC recente catalogato per questo ticker.")
-        else:
-            # Se il CIK non esiste o Polygon non ha profilato il titolo (es. ETF o Warrants)
-            st.html(f"""
-                <div style="background-color: #f9f9f9; border-left: 5px solid #ccc; padding: 12px; margin-top: 15px; border-radius: 4px; font-size: 13.5px;">
-                    <b>Dati SEC Non Disponibili</b><br>
-                    Il titolo cercato non possiede un codice CIK o i dati di bilancio standard SEC non sono registrati (comune per Warrant, ETF, SPAC o OTC molto illiquidi).
-                </div>
-            """)
+                           # USATO ST.HTML
+                           st.html(f"""
+                               <div style="text-align:center; font-size: 14px;">
+                                   {st.session_state['news']}
+                               </div>
+                           """)
+ 
+           if not v_gaps.empty:
+                with col3:
+                    col3_1, col3_2 = st.columns([0.18, 0.82])
+                    with col3_1:
+                        options = list(v_gaps.index)
+                        n_gap = st.selectbox('**gap da visualizzare**', options)
+                        
+                    if st.button('visualizza'):
+                        try:
+                            visual_gap(nome_ticker, (n_gap-1), st.session_state['dati_storici_ADJ'])
+                        except:
+                            # USATO ST.HTML
+                            st.html(f"""
+                                 <div style="text-align: center; font-size: 15px;">
+                                     grafico non disponibile
+                                 </div>
+                             """)
 
 st.markdown("""
     <style>
