@@ -371,7 +371,7 @@ def fetch_polygon_profile(nome_ticker):
                 "KI": "Kiribati", "KM": "Comoros", "KN": "Saint Kitts and Nevis", "KP": "North Korea",
                 "KR": "South Korea", "KW": "Kuwait", "KY": "Cayman Islands", "KZ": "Kazakhstan",
                 "LA": "Laos", "LB": "Lebanon", "LC": "Saint Lucia", "LI": "Liechtenstein", "LK": "Sri Lanka",
-                "LR": "Liberia", "LS": "Lesotho", "LT": "Lithuania", "LU": "Luxembourg", "LV": "Latvia",
+                "LR": "Liberia", "LS": "Lesotho", "LT": "Lithuania", "LU": "Lubembourg", "LV": "Latvia",
                 "LY": "Libya", "MA": "Morocco", "MC": "Monaco", "MD": "Moldova", "ME": "Montenegro",
                 "MF": "Saint Martin", "MG": "Madagascar", "MH": "Marshall Islands", "MK": "North Macedonia",
                 "ML": "Mali", "MM": "Myanmar", "MN": "Mongolia", "MO": "Macao", "MP": "Northern Mariana Islands",
@@ -773,10 +773,10 @@ def fondamentali_func(nome_ticker):
     except Exception as e:
         print("Errore caricamento Finviz:", e)
         
-    fond_fz_df = pd.DataFrame({'a': fondamentali_fz.keys(), 'Fz': fondamentali_fz.values()})
-    fond_yf_df = pd.DataFrame({'a': fondamentali_yf.keys(), 'Yf': fondamentali_yf.values()})
+    font_fz_df = pd.DataFrame({'a': fondamentali_fz.keys(), 'Fz': fondamentali_fz.values()})
+    font_yf_df = pd.DataFrame({'a': fondamentali_yf.keys(), 'Yf': fondamentali_yf.values()})
     
-    fond_df = fond_fz_df.merge(fond_yf_df, on='a').set_index('a')
+    fond_df = font_fz_df.merge(font_yf_df, on='a').set_index('a')
     fond_df.index.name = None
     return fond_df, nationality_exchange, sector_industry, website
 
@@ -827,28 +827,32 @@ def datagathering_func(nome_ticker):
               
               profile_data = cache_data.get('profile', None)
               
-              # CONDIZIONE DI AGGIORNAMENTO SPECIFICHE (Per evitare letture pedisseque di cache obsolete o con logica burn rate errata)
+              # CONDIZIONE DI AGGIORNAMENTO SPECIFICHE (v1.2 forza l'aggiornamento automatico e la ricalcolazione con logica robusta)
               needs_sec_update = False
-              if profile_data is None or cache_data.get('version') != "v1.1":
+              if profile_data is None or cache_data.get('version') != "v1.2":
                   needs_sec_update = True
               else:
                   sec_data = profile_data.get('sec_data')
-                  # Se mancano i nuovi campi richiesti dalle specifiche (es. 'active_offering_form') forziamo la rigenerazione
                   if not isinstance(sec_data, dict) or 'active_offering_form' not in sec_data:
+                      needs_sec_update = True
+                  # Se il CIK è assente o non valido nella cache esistente, forziamo l'aggiornamento
+                  elif not profile_data.get('cik') or str(profile_data.get('cik')).strip() in ['', '-', ' - ']:
                       needs_sec_update = True
               
               if needs_sec_update and not dati_storici.empty:
-                  print("Cache obsoleta o incompleta rilevata. Eseguo l'aggiornamento automatico con le nuove specifiche.")
-                  if profile_data is None:
+                  print("Cache obsoleta, incompleta o affetta da bug. Eseguo l'aggiornamento automatico con le specifiche v1.2.")
+                  
+                  # Se il profilo manca o non ha un CIK valido, lo riscarichiamo da Polygon
+                  if profile_data is None or not profile_data.get('cik') or str(profile_data.get('cik')).strip() in ['', '-', ' - ']:
                       profile_data = fetch_polygon_profile(nome_ticker)
                   
-                  # Scarica i dati finanziari SEC freschi con la nuova logica (che include active_offering_form e deduplicazione date)
+                  # Scarica i dati finanziari SEC freschi con la nuova logica deduplicata e univoca per data
                   sec_metrics = fetch_sec_data(profile_data.get('cik', ''))
                   profile_data['sec_data'] = sec_metrics
                   
                   try:
                       cache_data['profile'] = profile_data
-                      cache_data['version'] = 'v1.1'
+                      cache_data['version'] = 'v1.2' # Upgrade formale a v1.2
                       with open(cache_file, 'wb') as out_fp:
                           pickle.dump(cache_data, out_fp)
                   except Exception as e:
@@ -982,7 +986,7 @@ def datagathering_func(nome_ticker):
                        'splits': splits_format, 
                        'provider': provider,
                        'profile': fmp_profile,
-                       'version': 'v1.1'
+                       'version': 'v1.2'
                    }, fp)
                return dati_storici, splits_format, provider
     else:
