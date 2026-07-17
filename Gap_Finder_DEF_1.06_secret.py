@@ -1184,7 +1184,8 @@ st.set_page_config(
     layout="wide",  
 ) 
 
-col1, col2, col3 = st.columns([0.11, 0.45, 0.44])   
+# RESTRETTA LA COLONNA 3 PER DISTANZIARLA MAGGIORMENTE DALLA COLONNA 2
+col1, col2, col3 = st.columns([0.11, 0.49, 0.40])   
     
 # INSERISCO il TICKER
 global nome_ticker
@@ -1522,7 +1523,7 @@ with col3:
                             
                             if gaps_after_30.empty:
                                 # Scenario 1: Nessun gap post-deposito
-                                edge_msg = f"Form {form_type} depositato il {offering_date_str}. Nessun gap ≥ 30% registrato dopo il deposito."
+                                edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% registrata successiva al deposito.<br>Pressione di vendita imminente (ATM/Shelf intatto)."
                             else:
                                 red_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'RED']
                                 green_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'GREEN']
@@ -1532,43 +1533,34 @@ with col3:
                                 
                                 if n_red > 0:
                                     # Scenario 3: Almeno una chiusura RED post-deposito
-                                    edge_msg = f"Form {form_type} depositato il {offering_date_str}. Registrate {n_red} giornate in gap ≥ 30% con chiusura RED dopo il deposito."
+                                    edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Registrate {n_red} giornate in gap ≥ 30% con chiusura RED successive al deposito.<br>Diluizione completata (ATM/Shelf parzialmente o interamente scaricato)."
                                 else:
                                     # Scenario 2: Gap successivi ma tutti GREEN post-deposito
-                                    edge_msg = f"Form {form_type} depositato il {offering_date_str}. Registrate {n_green} giornate in gap ≥ 30% con chiusura GREEN dopo il deposito."
+                                    edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Registrate {n_green} giornate in gap ≥ 30% con chiusura GREEN successive al deposito.<br>Offering ancora pendente (cassa non ancora interamente scaricata)."
                         else:
                             # Se non ci sono gap rilevati in colonna 2, ricadiamo nello Scenario 1 (ATM intatto)
-                            edge_msg = f"Form {form_type} depositato il {offering_date_str}. Nessun gap ≥ 30% registrato dopo il deposito."
+                            edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% registrata successiva al deposito.<br>Pressione di vendita imminente (ATM/Shelf intatto)."
                     except Exception as e:
                         edge_msg = f"Form {form_type} depositato il {offering_date_str}."
                 else:
                     # Se non ci sono registrazioni di offering recenti negli ultimi 6 mesi, usiamo la Runway per definire l'opportunità
                     raw_runway = sec_data.get('runway_months', ' - ')
                     if "Cash Flow" in raw_runway or "+" in raw_runway:
-                        edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi. Cassa solida (flusso di cassa positivo)."
+                        edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi.<br>Trend finanziario solido (flusso di cassa positivo)."
                     elif "Critico" in raw_runway or "Illiquido" in raw_runway:
-                        edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi. Solvibilità critica o cassa illiquida."
+                        edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi.<br>Solvibilità critica o cassa illiquida (rischio diluizione imminente)."
                     else:
                         try:
                             # Converte in float l'autonomia escludendo la parola 'Mesi'
                             r_val = float(raw_runway.split()[0])
                             if r_val < 3.0:
-                                edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi. Autonomia di cassa inferiore a 3 mesi."
+                                edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi.<br>Autonomia di cassa critica (inferiore a 3 mesi)."
                             elif r_val < 12.0:
-                                edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi. Autonomia di cassa inferiore a 12 mesi."
+                                edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi.<br>Autonomia di cassa limitata (inferiore a 12 mesi)."
                             else:
-                                edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi. Autonomia di cassa superiore a 12 mesi."
+                                edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi.<br>Autonomia di cassa stabile (superiore a 12 mesi)."
                         except:
                             edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi."
-            
-            # Stampa la scheda anagrafica superiore (Sempre bianca, NO giudizi, NO colori di background)
-            risk_badge_html = f"""
-            <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-left: 5px solid #757575; padding: 12px; margin-top: 15px; margin-bottom: 20px; border-radius: 4px; font-family: system-ui,-apple-system;">
-                <div style="font-size: 13.5px; font-weight: bold; color: #333; margin-bottom: 4px;">⚠️ STATO REGISTRAZIONI & OFFERINGS</div>
-                <div style="color: #424242; font-size: 13px; line-height: 1.4;">{edge_msg}</div>
-            </div>
-            """
-            st.markdown(risk_badge_html, unsafe_allow_html=True)
             
             # Determinazione dei colori per le metriche in base alle soglie personalizzate di Luca
             runway_val_str = sec_data.get('runway_months', ' - ')
@@ -1620,7 +1612,7 @@ with col3:
             curr_assets_ratio_val = sec_data.get('current_assets_ratio', ' - ')
             liquidity_test_val = sec_data.get('liquidity_test', ' - ')
 
-            # 2. CARTE METRICHE COMPATTE HTML (Carattere ridotto a 18px per un cockpit a schede pulito e professionale)
+            # 1. AUTONOMIA DI CASSA (CASH RUNWAY) SPOSTATA IN CIMA
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-bottom: 10px;'>📊 AUTONOMIA DI CASSA (CASH RUNWAY)</div>", unsafe_allow_html=True)
             
             # Griglia di metriche superiori (Cassa, Burn, Runway)
@@ -1656,8 +1648,17 @@ with col3:
             </div>
             """
             st.markdown(metrics_bottom_html, unsafe_allow_html=True)
+
+            # 2. BLOCO OFFERINGS SPOSTATO SOTTO L'AUTONOMIA DI CASSA (Sempre bianco, NO giudizi, NO colori di background)
+            risk_badge_html = f"""
+            <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-left: 5px solid #757575; padding: 12px; margin-top: 15px; margin-bottom: 20px; border-radius: 4px; font-family: system-ui,-apple-system;">
+                <div style="font-size: 13.5px; font-weight: bold; color: #333; margin-bottom: 6px;">⚠️ OFFERINGS</div>
+                <div style="color: #424242; font-size: 13px; line-height: 1.4;">{edge_msg}</div>
+            </div>
+            """
+            st.markdown(risk_badge_html, unsafe_allow_html=True)
             
-            # Tabella degli ultimi link ai depositi SEC (I link sono applicati direttamente sul nome del modulo)
+            # 3. Tabella degli ultimi link ai depositi SEC (I link sono applicati direttamente sul nome del modulo)
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 25px; margin-bottom: 8px;'>📂 ULTIMI DEPOSITI SEC EDGAR RILEVANTI</div>", unsafe_allow_html=True)
             sec_links = sec_data.get('sec_links', [])
             if sec_links:
