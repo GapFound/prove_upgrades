@@ -66,6 +66,31 @@ def get_latest_fact(us_gaap, tags):
                 return float(official[-1]['val']), official[-1].get('form', '10-Q'), official
     return None, None, None
 
+# FUNZIONE PER ESTRARRE E CALCOLARE IL BURN RATE SULL'OPERATING CASH FLOW REALE (OCF)
+def get_ocf_burn(us_gaap, cash_val):
+    ocf_tags = [
+        'NetCashProvidedByUsedInOperatingActivities',
+        'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations',
+        'CashFlowsFromUsedInOperatingActivities',
+        'NetCashFlowsFromUsedInOperatingActivities'
+    ]
+    ocf_val, ocf_form, ocf_units = get_latest_fact(us_gaap, ocf_tags)
+    if ocf_val is not None and ocf_val < 0:
+        # Trova l'ultima voce per calcolare i mesi di copertura reali dell'OCF (duration)
+        latest_ocf = ocf_units[-1]
+        try:
+            start_dt = datetime.strptime(latest_ocf['start'], "%Y-%m-%d").date()
+            end_dt = datetime.strptime(latest_ocf['end'], "%Y-%m-%d").date()
+            ocf_months = (end_dt - start_dt).days / 30.4375
+            if ocf_months < 1.0:
+                ocf_months = 3.0 # Fallback trimestre
+        except:
+            ocf_months = 12.0 if ocf_form in ['10-K', '20-F'] else 3.0
+        
+        monthly_burn = -ocf_val / ocf_months
+        return monthly_burn
+    return None
+
 # FUNZIONE PER SCARICARE I DATI DI CASSA E RISK DILUTION DIRETTAMENTE DALLA SEC EDGAR (100% GRATUITA ED ILLIMITATA)
 def fetch_sec_data(cik):
     default_sec = {
@@ -121,72 +146,112 @@ def fetch_sec_data(cik):
             if cash_val is None:
                 risk_status = "UNKNOWN"
             
-            # RILEVAZIONE E FILTRAGGIO CRONOLOGICO DEGLI END-DATE DISTINTI PER EVITARE FALSI POSITIVI DA DUPLICATI
-            if cash_units:
-                # Seleziona i report ufficiali per ridurre il rumore, altrimenti usa tutti i record disponibili
-                official_units = [u for u in cash_units if u.get('form') in ['10-Q', '10-K', '20-F']]
-                target_units = official_units if official_units else cash_units
+            # Calcolo dei Ratio di solvibilità immediati
+            ratio_str = " - "
+            ratio_val = None
+            if cash_val is not None and assets_val:
+                ratio_val = (cash_val / assets_val) * 100
+                ratio_str = f"{ratio_val:.2f}%"
                 
-                unique_cash = {}
-                for u in target_units:
-                    end_str = u.get('end')
-                    val = u.get('val')
-                    if end_str and val is not None:
-                        try:
-                            end_dt = datetime.strptime(end_str, "%Y-%m-%d").date()
-                            # L'iterazione sequenziale sovrascrive i duplicati conservando l'ultimo dato depositato
-                            unique_cash[end_str] = {
-                                'val': float(val),
-                                'date': end_dt
-                            }
-                        except ValueError:
-                            pass
-                
-                # Ordina cronologicamente le date distinte ottenute
-                sorted_cash_periods = sorted(unique_cash.values(), key=lambda x: x['date'])
-                
-                if len(sorted_cash_periods) >= 2:
-                    latest_period = sorted_cash_periods[-1]
-                    prev_period = sorted_cash_periods[-2]
+            liq_str = " - "
+            liq_val = None
+            if cash_val is not None and liabilities_val:
+                liq_val = cash_val / liabilities_val
+                liq_str = f"{liq_val:.2f}"
+                if liq_val < 1.2:
+                    risk_status = "RED" # Sotto 1.2: Rischio insolvenza immediata
+                elif liq_val < 1.5 and risk_status != "RED":
+                    risk_status = "YELLOW"
+            
+            # DETERMINAZIONE DEL BURN RATE OPERATIVO REALE (OCF)
+            ocf_burn = get_ocf_burn(us_gaap, cash_val)
+            
+            if ocf_burn is not None and cash_val is not None:
+                monthly_burn_val = ocf_burn
+                runway_val = cash_val / monthly_burn_val
+                runway_str = f"{runway_val:.2f} Mesi"
+                if runway_val < 3.0:
+                    risk_status = "RED"
+                elif runway_val < 12.0 and risk_status != "RED":
+                    risk_status = "YELLOW"
+            else:
+                # FALLBACK: Variazione temporale del saldo di cassa se l'OCF è assente o positivo
+                if cash_units:
+                    # Seleziona i report ufficiali per ridurre il rumore, altrimenti usa tutti i record disponibili
+                    official_units = [u for u in cash_units if u.get('form') in ['10-Q', '10-K', '20-F']]
+                    target_units = official_units if official_units else cash_units
                     
-                    latest_cash = latest_period['val']
-                    prev_cash = prev_period['val']
+                    unique_cash = {}
+                    for u in target_units:
+                        end_str = u.get('end')
+                        val = u.get('val')
+                        if end_str and val is not None:
+                            try:
+                                end_dt = datetime.strptime(end_str, "%Y-%m-%d").date()
+                                # L'iterazione sequenziale sovrascrive i duplicati conservando l'ultimo dato depositato
+                                unique_cash[end_str] = {
+                                    'val': float(val),
+                                    'date': end_dt
+                                }
+                            except ValueError:
+                                pass
                     
-                    # Calcola i mesi reali trascorsi tra le due date di bilancio
-                    date_diff = latest_period['date'] - prev_period['date']
-                    months_diff = date_diff.days / 30.4375
+                    # Ordina cronologicamente le date distinte ottenute
+                    sorted_cash_periods = sorted(unique_cash.values(), key=lambda x: x['date'])
                     
-                    # Protezione contro record sovrapposti o anomali
-                    if months_diff > 0.5:
-                        cash_change = prev_cash - latest_cash # Se positivo, indica decremento (burn di cassa)
+                    if len(sorted_cash_periods) >= 2:
+                        latest_period = sorted_cash_periods[-1]
+                        prev_period = sorted_cash_periods[-2]
                         
-                        if cash_change > 0:
-                            monthly_burn_val = cash_change / months_diff
-                            runway_val = latest_cash / monthly_burn_val
-                            runway_str = f"{runway_val:.2f} Mesi"
-                            if runway_val < 3.0:
-                                risk_status = "RED"
-                            elif runway_val < 12.0 and risk_status != "RED":
-                                risk_status = "YELLOW"
-                        elif cash_change < 0:
-                            # Cassa effettivamente aumentata rispetto al trimestre/anno precedente
-                            monthly_burn_val = 0.0
-                            runway_str = "Cash Flow +"
+                        latest_cash = latest_period['val']
+                        prev_cash = prev_period['val']
+                        
+                        # Calcola i mesi reali trascorsi tra le due date di bilancio
+                        date_diff = latest_period['date'] - prev_period['date']
+                        months_diff = date_diff.days / 30.4375
+                        
+                        # Protezione contro record sovrapposti o anomali
+                        if months_diff > 0.5:
+                            cash_change = prev_cash - latest_cash # Se positivo, indica decremento (burn di cassa)
+                            
+                            if cash_change > 0:
+                                monthly_burn_val = cash_change / months_diff
+                                runway_val = latest_cash / monthly_burn_val
+                                runway_str = f"{runway_val:.2f} Mesi"
+                                if runway_val < 3.0:
+                                    risk_status = "RED"
+                                elif runway_val < 12.0 and risk_status != "RED":
+                                    risk_status = "YELLOW"
+                            elif cash_change < 0:
+                                # SOLVENCY OVERRIDE: Se la liquidità è critica, non possiamo mostrare un finto Cash Flow Positivo
+                                is_insolvent = False
+                                if liq_val is not None and liq_val < 1.2:
+                                    is_insolvent = True
+                                if ratio_val is not None and ratio_val < 20.0:
+                                    is_insolvent = True
+                                    
+                                if is_insolvent:
+                                    monthly_burn_val = None
+                                    runway_str = "Critico / Illiquido"
+                                    risk_status = "RED"
+                                else:
+                                    monthly_burn_val = 0.0
+                                    runway_str = "Cash Flow +"
+                            else:
+                                # Cassa rimasta perfettamente identica
+                                monthly_burn_val = 0.0
+                                runway_str = " - "
                         else:
-                            # Cassa rimasta perfettamente identica
-                            monthly_burn_val = 0.0
+                            monthly_burn_val = None
                             runway_str = " - "
                     else:
+                        # Elementi insufficienti per calcolare la variazione cronologica (es. 1 solo bilancio)
                         monthly_burn_val = None
                         runway_str = " - "
                 else:
-                    # Elementi insufficienti per calcolare la variazione cronologica (es. 1 solo bilancio)
+                    # Nessun dato temporale di cassa registrato
                     monthly_burn_val = None
                     runway_str = " - "
-            else:
-                # Nessun dato temporale di cassa registrato
-                monthly_burn_val = None
-                runway_str = " - "
         
         # 2. Recupero moduli depositati (Submissions) per trovare Offering attive negli ultimi 6 mesi
         sub_url = f"https://data.sec.gov/submissions/CIK{cik_str}.json"
@@ -240,22 +305,6 @@ def fetch_sec_data(cik):
                     except:
                         pass
                     
-        # Calcolo Cash / Current Assets Ratio %
-        ratio_str = " - "
-        if cash_val is not None and assets_val:
-            ratio_val = (cash_val / assets_val) * 100
-            ratio_str = f"{ratio_val:.2f}%"
-            
-        # Calcolo Liquidity Test Ratio (Cassa / Passività Correnti)
-        liq_str = " - "
-        if cash_val is not None and liabilities_val:
-            liq_val = cash_val / liabilities_val
-            liq_str = f"{liq_val:.2f}"
-            if liq_val < 1.2:
-                risk_status = "RED" # Sotto 1.2: Rischio insolvenza immediata
-            elif liq_val < 1.5 and risk_status != "RED":
-                risk_status = "YELLOW"
-                
         return {
             'cash_on_hand': format_millions(cash_val) if cash_val is not None else ' - ',
             'monthly_burn': format_millions(monthly_burn_val) if monthly_burn_val is not None else ' - ',
@@ -376,8 +425,8 @@ def fetch_polygon_profile(nome_ticker):
                 "MF": "Saint Martin", "MG": "Madagascar", "MH": "Marshall Islands", "MK": "North Macedonia",
                 "ML": "Mali", "MM": "Myanmar", "MN": "Mongolia", "MO": "Macao", "MP": "Northern Mariana Islands",
                 "MQ": "Martinique", "MR": "Mauritania", "MS": "Montserrat", "MT": "Malta", "MU": "Mauritius",
-                "MV": "Maldives", "MW": "Malawi", "MX": "Mexico", "MY": "Malaysia", "MZ": "Mozambique",
-                "NA": "Namibia", "NC": "New Caledonia", "NE": "Niger", "NF": "Norfolk Island", "NG": "Nigeria",
+                "MV": "Maldives", "MW": "Malawi", "MX": "Mexico", "MY": "Malaysia", "MZ": "Possession", "NA": "Namibia",
+                "NC": "New Caledonia", "NE": "Niger", "NF": "Norfolk Island", "NG": "Nigeria",
                 "NI": "Nicaragua", "NL": "Netherlands", "NO": "Norway", "NP": "Nepal", "NR": "Nauru",
                 "NU": "Niue", "NZ": "New Zealand", "OM": "Oman", "PA": "Panama", "PE": "Peru", "PF": "French Polynesia",
                 "PG": "Papua New Guinea", "PH": "Philippines", "PK": "Pakistan", "PL": "Poland",
@@ -819,7 +868,7 @@ def datagathering_func(nome_ticker):
         
     if os.path.exists(cache_file):
           with open(cache_file, "rb") as fp:
-              print(f"Caricamento dati daily, splits e profilo {nome_ticker} dalla cache.")
+              print(f"Caricamento daily e splits {nome_ticker} dalla cache.")
               cache_data = pickle.load(fp)
               dati_storici = cache_data['dati_storici']
               splits_format = cache_data['splits']
@@ -1454,15 +1503,9 @@ with col3:
             short_edge = "UNKNOWN"
             edge_msg = "Analisi basata sulla runway trimestrale dei dati SEC e sul monitoraggio delle registrazioni di offering pendenti."
             
-            # Valori grafici di default per il Badge superiore
-            bg_color = "#f9f9f9"
-            border_color = "#ccc"
-            text_color = "#333"
-            risk_label = "SHORT EDGE: UNKNOWN STATUS"
-            
             # Se mancano del tutto i dati SEC, rimane grigio spento
             if sec_data.get('cash_on_hand') == ' - ':
-                short_edge = "UNKNOWN"
+                edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi."
             else:
                 if offering_date_str and str(offering_date_str).strip() not in ['', '-', ' - ']:
                     try:
@@ -1479,87 +1522,52 @@ with col3:
                             
                             if gaps_after_30.empty:
                                 # Scenario 1: Nessun gap post-deposito
-                                short_edge = "CRITICAL"
-                                bg_color = "#ffebee"
-                                border_color = "#d32f2f"
-                                text_color = "#c62828"
-                                risk_label = "🚨 SHORT EDGE: OTTIMA OPPORTUNITA' - Nessuna giornata in gap dopo il deposito del modulo"
-                                edge_msg = f"⚠️ Form {form_type} depositato il {offering_date_str}. SHORT EDGE CRITICO: Nessun gap registrato dopo il deposito. L'offering (ATM/Shelf) è intatta e non ancora scaricata."
+                                edge_msg = f"Form {form_type} depositato il {offering_date_str}. Nessun gap ≥ 30% registrato dopo il deposito."
                             else:
                                 red_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'RED']
                                 green_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'GREEN']
                                 
                                 n_red = len(red_gaps)
                                 n_green = len(green_gaps)
-                                n_total = len(gaps_after_30)
                                 
                                 if n_red > 0:
                                     # Scenario 3: Almeno una chiusura RED post-deposito
-                                    short_edge = "LOW"
-                                    bg_color = "#e8f5e9"
-                                    border_color = "#388e3c"
-                                    text_color = "#2e7d32"
-                                    risk_label = f"✅ SHORT EDGE: OPPORTUNITA' BASSA - {n_red} giornate in gap con chiusura RED dopo il deposito del modulo"
-                                    edge_msg = f"✅ Form {form_type} depositato il {offering_date_str}. SHORT EDGE BASSO: Registrate {n_red} giornate in gap con chiusura RED dopo il deposito. La diluizione è probabilmente già stata completata e digerita dal mercato."
+                                    edge_msg = f"Form {form_type} depositato il {offering_date_str}. Registrate {n_red} giornate in gap ≥ 30% con chiusura RED dopo il deposito."
                                 else:
                                     # Scenario 2: Gap successivi ma tutti GREEN post-deposito
-                                    short_edge = "HIGH"
-                                    bg_color = "#fffde7"
-                                    border_color = "#fbc02d"
-                                    text_color = "#f57f17"
-                                    risk_label = f"⚠️ SHORT EDGE: OTTIMA OPPORTUNITA' - {n_green} giornate in gap con chiusura GREEN dopo il deposito del modulo"
-                                    edge_msg = f"⚠️ Form {form_type} depositato il {offering_date_str}. SHORT EDGE ALTO: Registrate {n_green} giornate in gap con chiusura GREEN dopo il deposito. L'offering è ancora pendente e non interamente scaricata."
+                                    edge_msg = f"Form {form_type} depositato il {offering_date_str}. Registrate {n_green} giornate in gap ≥ 30% con chiusura GREEN dopo il deposito."
                         else:
                             # Se non ci sono gap rilevati in colonna 2, ricadiamo nello Scenario 1 (ATM intatto)
-                            short_edge = "CRITICAL"
-                            bg_color = "#ffebee"
-                            border_color = "#d32f2f"
-                            text_color = "#c62828"
-                            risk_label = "🚨 SHORT EDGE: OTTIMA OPPORTUNITA' - Nessuna giornata in gap dopo il deposito del modulo"
-                            edge_msg = f"⚠️ Form {form_type} depositato il {offering_date_str}. SHORT EDGE CRITICO: Nessun gap registrato dopo il deposito. L'offering (ATM/Shelf) è intatta e non ancora scaricata."
+                            edge_msg = f"Form {form_type} depositato il {offering_date_str}. Nessun gap ≥ 30% registrato dopo il deposito."
                     except Exception as e:
-                        print("Errore calcolo cronologico short edge:", e)
-                        short_edge = "UNKNOWN"
+                        edge_msg = f"Form {form_type} depositato il {offering_date_str}."
                 else:
                     # Se non ci sono registrazioni di offering recenti negli ultimi 6 mesi, usiamo la Runway per definire l'opportunità
                     raw_runway = sec_data.get('runway_months', ' - ')
                     if "Cash Flow" in raw_runway or "+" in raw_runway:
-                        short_edge = "LOW"
-                        bg_color = "#e8f5e9"
-                        border_color = "#388e3c"
-                        text_color = "#2e7d32"
-                        risk_label = "✅ SHORT EDGE: BASSO (Opportunità Minima)"
-                        edge_msg = "SHORT EDGE BASSO — Nessuna offering recente rilevata e cassa solida (flusso di cassa positivo)."
+                        edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi. Cassa solida (flusso di cassa positivo)."
+                    elif "Critico" in raw_runway or "Illiquido" in raw_runway:
+                        edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi. Solvibilità critica o cassa illiquida."
                     else:
                         try:
                             # Converte in float l'autonomia escludendo la parola 'Mesi'
                             r_val = float(raw_runway.split()[0])
                             if r_val < 3.0:
-                                short_edge = "CRITICAL"
-                                bg_color = "#ffebee"
-                                border_color = "#d32f2f"
-                                text_color = "#c62828"
-                                risk_label = "🚨 SHORT EDGE: CRITICO (Opportunità Massima)"
-                                edge_msg = f"SHORT EDGE CRITICO (Cassa in esaurimento) — Nessuna offering recente, ma autonomia inferiore a 3 mesi."
+                                edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi. Autonomia di cassa inferiore a 3 mesi."
                             elif r_val < 12.0:
-                                short_edge = "HIGH"
-                                bg_color = "#fffde7"
-                                border_color = "#fbc02d"
-                                text_color = "#f57f17"
-                                risk_label = "⚠️ SHORT EDGE: ALTO (Opportunità Forte)"
-                                edge_msg = f"SHORT EDGE ALTO (Autonomia limitata) — Nessuna offering recente, ma autonomia inferiore a 12 mesi."
+                                edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi. Autonomia di cassa inferiore a 12 mesi."
                             else:
-                                short_edge = "LOW"
-                                bg_color = "#e8f5e9"
-                                border_color = "#388e3c"
-                                text_color = "#2e7d32"
-                                risk_label = "✅ SHORT EDGE: BASSO (Opportunità Minima)"
-                                edge_msg = "SHORT EDGE BASSO — Nessuna offering recente e cassa sicura (oltre 12 mesi di autonomia)."
+                                edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi. Autonomia di cassa superiore a 12 mesi."
                         except:
-                            short_edge = "UNKNOWN"
+                            edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi."
             
-            # Stampa il Badge Grafico in alto (Stringa piatta per evitare box grigi)
-            risk_badge_html = f'<div style="background-color: {bg_color}; border-left: 5px solid {border_color}; padding: 12px; margin-top: 15px; margin-bottom: 20px; border-radius: 4px;"><span style="color: {text_color}; font-size: 15px; font-weight: bold;">{risk_label}</span><br><span style="color: #37474f; font-size: 12px;">{edge_msg}</span></div>'
+            # Stampa la scheda anagrafica superiore (Sempre bianca, NO giudizi, NO colori di background)
+            risk_badge_html = f"""
+            <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-left: 5px solid #757575; padding: 12px; margin-top: 15px; margin-bottom: 20px; border-radius: 4px; font-family: system-ui,-apple-system;">
+                <div style="font-size: 13.5px; font-weight: bold; color: #333; margin-bottom: 4px;">⚠️ STATO REGISTRAZIONI & OFFERINGS</div>
+                <div style="color: #424242; font-size: 13px; line-height: 1.4;">{edge_msg}</div>
+            </div>
+            """
             st.markdown(risk_badge_html, unsafe_allow_html=True)
             
             # Determinazione dei colori per le metriche in base alle soglie personalizzate di Luca
@@ -1568,6 +1576,8 @@ with col3:
             if "Cash Flow" in runway_val_str or "Positive" in runway_val_str or "+" in runway_val_str:
                 runway_color = "#2e7d32" # Verde brillante per Cash Flow Positivo
                 runway_val_str = "Cash Flow +" # Sostituita la stringa per evitare troncamenti grafici nelle card
+            elif "Critico" in runway_val_str or "Illiquido" in runway_val_str:
+                runway_color = "#c62828" # Rosso allerta per illiquidità strutturale
             else:
                 try:
                     r_val = float(runway_val_str.split()[0])
@@ -1604,7 +1614,7 @@ with col3:
             except:
                 pass
 
-            # 2. CARTE METRICHE COMPATTE HTML (Carattere ridotto a 18px per un cockpit a schede pulito e professionale)
+            # CARTE METRICHE COMPATTE HTML (Carattere ridotto a 18px per un cockpit a schede pulito e professionale)
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-bottom: 10px;'>📊 AUTONOMIA DI CASSA (CASH RUNWAY)</div>", unsafe_allow_html=True)
             
             # Griglia di metriche superiori (Cassa, Burn, Runway)
@@ -1619,7 +1629,7 @@ with col3:
                     <div style="font-size: 18px; font-weight: bold; color: #111;">{sec_data.get('monthly_burn', ' - ')}</div>
                 </div>
                 <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Autonomia di cassa in mesi prima del completo esaurimento delle riserves (Sotto i 3 mesi: Rosso, Sotto i 12 mesi: Arancione, Sopra i 12: Verde).">Runway Cassa ℹ️</div>
+                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Autonomia di cassa in mesi prima del completo esaurimento delle riserve (Sotto i 3 mesi: Rosso, Sotto i 12 mesi: Arancione, Sopra i 12: Verde).">Runway Cassa ℹ️</div>
                     <div style="font-size: 18px; font-weight: bold; color: {runway_color};">{runway_val_str}</div>
                 </div>
             </div>
@@ -1636,51 +1646,4 @@ with col3:
                 <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
                     <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Cassa liquida divisa per le passività correnti (debiti entro l'anno). Sotto 1.2 indica alto rischio di insolvenza immediata e diluizione forzata (Rosso).">Liquidity Test Ratio ℹ️</div>
                     <div style="font-size: 18px; font-weight: bold; color: {liq_color};">{sec_data.get('liquidity_test', ' - ')}</div>
-                </div>
-            </div>
-            """
-            st.markdown(metrics_bottom_html, unsafe_allow_html=True)
-            
-            # 3. Offering attive (Badge e allineamento) con il remind spostato elegantemente nell'help tooltip di st.markdown
-            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 15px; margin-bottom: 5px;'>⚠️ STATO REGISTRAZIONI & OFFERINGS</div>", unsafe_allow_html=True)
-            offering_box_html = f'<div style="background-color: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; font-size: 13px;" title="Dilution Alert: Se l\'autonomia della cassa o il test di liquidità indicano livelli critici (Rosso), la società ha altissime probabilità di diluire nel brevissimo periodo per far fronte alle passività correnti."><div style="margin-bottom: 4px;"><b>Stato Offering ℹ️</b>: {edge_msg}</div><div>Passa il mouse per visualizzare il Dilution Alert sulla solvibilità della società.</div></div>'
-            st.markdown(offering_box_html, unsafe_allow_html=True)
-            
-            # 4. Tabella degli ultimi link ai depositi SEC (Link in nuove schede con stringhe piatte)
-            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 25px; margin-bottom: 8px;'>📂 ULTIMI DEPOSITI SEC EDGAR RILEVANTI</div>", unsafe_allow_html=True)
-            sec_links = sec_data.get('sec_links', [])
-            if sec_links:
-                sec_html = ""
-                for item in sec_links:
-                    sec_html += f'<div style="font-size: 13px; margin-bottom: 5px; padding-bottom: 5px; border-bottom: 1px solid #f9f9f9;"><span style="color: #666;">[{item["date"]}]</span>&nbsp;&nbsp;<strong style="color: #d00;">Form {item["form"]}</strong>&nbsp;&nbsp;—&nbsp;&nbsp;<a href="{item["link"]}" style="text-decoration: none; color: blue; font-weight: bold;" target="_blank">Apri Deposito su SEC 🔗</a></div>'
-                st.markdown(sec_html, unsafe_allow_html=True)
-            else:
-                st.write("Nessun deposito SEC recente catalogato per questo ticker.")
-        else:
-            # Se il CIK non esiste o Polygon non ha profilato il titolo (es. ETF o Warrants)
-            error_sec_html = f'<div style="background-color: #f9f9f9; border-left: 5px solid #ccc; padding: 12px; margin-top: 15px; border-radius: 4px; font-size: 13.5px;"><b>Dati SEC Non Disponibili</b><br>Il titolo cercato non possiede un codice CIK o i dati di bilancio standard SEC non sono registrati (comune per Warrant, ETF, SPAC o OTC molto illiquidi).</div>'
-            st.markdown(error_sec_html, unsafe_allow_html=True)
-
-st.markdown("""
-    <style>
-        .footer {
-            position: fixed;
-            bottom: 0;
-            width: 100%;
-            text-align: center;
-            background-color: #e0e0e0; 
-            padding: 6px;
-        }
-        .footer a {
-            font-size: 12px; 
-            text-decoration: none;
-            color: blue; 
-        }
-        .footer a:hover {
-            text-decoration: underline;
-        }
-    </style>
-    <div class="footer">
-        <a href="https://GapFound.github.io/GAP_Finder_dipendent_files/disclaimer.html" target="_blank">Data Disclaimer</a>
-    </div>
-""", unsafe_allow_html=True)
+                </
