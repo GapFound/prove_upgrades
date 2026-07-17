@@ -76,6 +76,7 @@ def fetch_sec_data(cik):
         'liquidity_test': ' - ',
         'risk_status': 'UNKNOWN',
         'active_offering': 'Nessuna offering registrata di recente',
+        'active_offering_date': ' - ',
         'sec_links': []
     }
     if not cik or str(cik).strip() in ['', '-', ' - ']:
@@ -118,7 +119,7 @@ def fetch_sec_data(cik):
             if cash_units and len(cash_units) >= 2:
                 latest_cash = float(cash_units[-1]['val'])
                 prev_cash = float(cash_units[-2]['val'])
-                cash_change = prev_cash - latest_cash # Se positivo indica decremento di cassa (bruciatura)
+                cash_change = prev_cash - latest_cash # Se positivo indica decremento di cassa
                 if cash_change > 0:
                     monthly_burn = cash_change / 3.0
         
@@ -127,6 +128,7 @@ def fetch_sec_data(cik):
         sub_res = requests.get(sub_url, headers=headers)
         
         active_offering = "Nessuna offering pendente registrata di recente"
+        active_offering_date = " - "
         sec_links = []
         risk_status = "GREEN" # Default in salute
         
@@ -165,7 +167,8 @@ def fetch_sec_data(cik):
                     try:
                         filing_dt = datetime.strptime(filing_date, "%Y-%m-%d").date()
                         if (datetime.now().date() - filing_dt).days <= 180:
-                            active_offering = f"⚠️ Form {form_type} depositato il {filing_date}"
+                            active_offering = f" Form {form_type} depositato il {filing_date}"
+                            active_offering_date = filing_date
                             risk_status = "RED" # Scatta l'allerta rossa di diluizione attiva
                             found_offering = True
                     except:
@@ -182,7 +185,7 @@ def fetch_sec_data(cik):
                 elif runway_val < 12.0 and risk_status != "RED":
                     risk_status = "YELLOW" # Tra 3 e 12 mesi: Arancione
             else:
-                runway_str = "Cash Flow +" # Se non brucia, mostra Cash Flow + in verde
+                runway_str = "Cash Flow +" # Se non brucia, mostra Cash Flow +
                 if risk_status != "RED":
                     risk_status = "GREEN"
                     
@@ -210,6 +213,7 @@ def fetch_sec_data(cik):
             'liquidity_test': liq_str,
             'risk_status': risk_status,
             'active_offering': active_offering,
+            'active_offering_date': active_offering_date,
             'sec_links': sec_links
         }
     except Exception as e:
@@ -771,7 +775,7 @@ def datagathering_func(nome_ticker):
               
               profile_data = cache_data.get('profile', None)
               
-              # LAZY-LOAD INTELLIGENTE: Se il profilo manca nel vecchio file .pkl, lo scarichiamo una volta sola e ri-salviamo il file .pkl
+              # LAZY-LOAD INTELLIGENTE: Se il profilo o i dati SEC mancano nel vecchio file .pkl, lo scarichiamo una volta sola e ri-salviamo il file .pkl
               if (profile_data is None or 'sec_data' not in profile_data) and not dati_storici.empty:
                   print("Profilo o dati SEC mancanti nella vecchia cache. Eseguo lazy-load da Massive/Polygon e SEC.")
                   if profile_data is None:
@@ -1081,7 +1085,6 @@ st.set_page_config(
     page_title="GAPs Finder",
     page_icon="📈",
     layout="wide",  
-    initial_sidebar_state="expanded",  
 ) 
 
 col1, col2, col3 = st.columns([0.11, 0.45, 0.44])   
@@ -1393,49 +1396,107 @@ with col3:
             sec_data = cached_profile.get('sec_data')
             
         if isinstance(sec_data, dict):
-            # 1. Box Grafico di Rischio in alto (con colori dinamici)
-            risk_status = sec_data.get('risk_status', 'UNKNOWN')
+            # ANALISI CRONOLOGICA DI DIGESTIONE DELL'OFFERING RISPETTO AI GAP REALI (SHORT EDGE DI LUCA)
+            offering_date_str = sec_data.get('active_offering_date')
+            short_edge = "UNKNOWN"
+            edge_msg = "Analisi basata sulla runway trimestrale dei dati SEC e sul monitoraggio delle registrazioni di offering pendenti."
+            
+            # Valori grafici di default per il Badge superiore
             bg_color = "#f9f9f9"
             border_color = "#ccc"
             text_color = "#333"
-            risk_label = "RISK VERDICT: UNKNOWN STATUS"
+            risk_label = "SHORT EDGE: UNKNOWN STATUS"
             
-            # Se mancano i dati fondamentali, lo stato rimane UNKNOWN (Grigio spento neutro)
+            # Se mancano del tutto i dati SEC, rimane grigio spento
             if sec_data.get('cash_on_hand') == ' - ':
-                risk_status = "UNKNOWN"
+                short_edge = "UNKNOWN"
+            else:
+                if offering_date_str and str(offering_date_str).strip() not in ['', '-', ' - ']:
+                    try:
+                        off_date = datetime.strptime(offering_date_str, "%Y-%m-%d").date()
+                        
+                        # Filtriamo i dati storici dei gapper per trovare quelli successivi al deposito dell'offering
+                        df_hist = st.session_state['dati_storici'].copy()
+                        df_hist['Date'] = pd.to_datetime(df_hist['Date']).dt.date
+                        
+                        # Definiamo i gap storici usando la soglia standard del 30%
+                        gaps_after = df_hist[(df_hist['Date'] > off_date) & (df_hist['Gap %'] >= 30.0)]
+                        
+                        if gaps_after.empty:
+                            short_edge = "CRITICAL"
+                            edge_msg = f"SHORT EDGE MASSIMO — Nessun gap registrato dopo il deposito del {offering_date_str} (ATM/Shelf intatto e non ancora scaricato)."
+                        else:
+                            red_gaps = gaps_after[gaps_after['Chiusura'] == 'RED']
+                            green_gaps = gaps_after[gaps_after['Chiusura'] == 'GREEN']
+                            
+                            red_count = len(red_gaps)
+                            green_count = len(green_gaps)
+                            
+                            # Se ci sono stati gap rossi (scaricamento avvenuto), l'edge short scende perché l'offering è digerita
+                            if red_count > 0:
+                                short_edge = "LOW"
+                                edge_msg = f"SHORT EDGE BASSO (Diluizione già digerita) — Registrate {red_count} giornate in gap con chiusura RED dopo il deposito."
+                            else:
+                                short_edge = "HIGH"
+                                edge_msg = f"SHORT EDGE ALTO (Offering non ancora scaricata) — Registrate {green_count} giornate in gap con chiusura GREEN dopo il deposito."
+                    except Exception as e:
+                        print("Errore calcolo cronologico short edge:", e)
+                        short_edge = "UNKNOWN"
+                else:
+                    # Se non ci sono registrazioni di offering recenti negli ultimi 6 mesi, usiamo la Runway per definire l'opportunità
+                    raw_runway = sec_data.get('runway_months', ' - ')
+                    if raw_runway == "Cash Flow +":
+                        short_edge = "LOW"
+                        edge_msg = "SHORT EDGE BASSO — Nessuna offering recente rilevata e cassa solida (flusso di cassa positivo)."
+                    else:
+                        try:
+                            r_val = float(raw_runway.split()[0])
+                            if r_val < 3.0:
+                                short_edge = "CRITICAL"
+                                edge_msg = f"SHORT EDGE CRITICO (Cassa in esaurimento) — Nessuna offering recente, ma autonomia inferiore a {runway_val_str}."
+                            elif r_val < 12.0:
+                                short_edge = "HIGH"
+                                edge_msg = f"SHORT EDGE ALTO (Autonomia limitata) — Nessuna offering recente, ma autonomia inferiore a 12 mesi."
+                            else:
+                                short_edge = "LOW"
+                                edge_msg = "SHORT EDGE BASSO — Nessuna offering recente e cassa sicura (oltre 12 mesi di autonomia)."
+                        except:
+                            short_edge = "UNKNOWN"
             
-            if risk_status == "RED":
+            # Assegnazione dei colori del Badge in base all'opportunità Short
+            if short_edge == "CRITICAL":
                 bg_color = "#ffebee"
                 border_color = "#d32f2f"
                 text_color = "#c62828"
-                risk_label = f"🚨 RISK STATUS: CRITICAL DILUTION RISK"
-            elif risk_status == "YELLOW":
+                risk_label = "🚨 SHORT EDGE: CRITICO (Opportunità Massima)"
+            elif short_edge == "HIGH":
                 bg_color = "#fffde7"
                 border_color = "#fbc02d"
                 text_color = "#f57f17"
-                risk_label = f"⚠️ RISK STATUS: MEDIUM DILUTION RISK"
-            elif risk_status == "GREEN":
+                risk_label = "⚠️ SHORT EDGE: ALTO (Opportunità Forte)"
+            elif short_edge == "LOW":
                 bg_color = "#e8f5e9"
                 border_color = "#388e3c"
                 text_color = "#2e7d32"
-                risk_label = f"✅ RISK STATUS: LOW DILUTION RISK"
-            elif risk_status == "UNKNOWN":
+                risk_label = "✅ SHORT EDGE: BASSO (Opportunità Minima)"
+            elif short_edge == "UNKNOWN":
                 bg_color = "#f9f9f9"
                 border_color = "#ccc"
                 text_color = "#333"
-                risk_label = "RISK STATUS: UNKNOWN (LACK OF SEC DATA)"
+                risk_label = "SHORT EDGE: SCONOSCIUTO"
                 
             # Stampa il Badge Grafico in alto (Stringa piatta per evitare box grigi)
-            risk_badge_html = f'<div style="background-color: {bg_color}; border-left: 5px solid {border_color}; padding: 12px; margin-top: 15px; margin-bottom: 20px; border-radius: 4px;"><span style="color: {text_color}; font-size: 15px; font-weight: bold;">{risk_label}</span><br><span style="color: #37474f; font-size: 12px;">Analisi basata sulla runway trimestrale dei dati SEC e sul monitoraggio delle registrazioni di offering pendenti.</span></div>'
+            risk_badge_html = f'<div style="background-color: {bg_color}; border-left: 5px solid {border_color}; padding: 12px; margin-top: 15px; margin-bottom: 20px; border-radius: 4px;"><span style="color: {text_color}; font-size: 15px; font-weight: bold;">{risk_label}</span><br><span style="color: #37474f; font-size: 12px;">{edge_msg}</span></div>'
             st.markdown(risk_badge_html, unsafe_allow_html=True)
             
-            # Determinazione dei colori per le metriche in base alle soglie di Luca
+            # Determinazione dei colori per le metriche in base alle soglie personalizzate di Luca
             runway_val_str = sec_data.get('runway_months', ' - ')
             runway_color = "#333"
-            try:
-                if runway_val_str == "Cash Flow +":
-                    runway_color = "#2e7d32" # Verde
-                else:
+            if "Cash Flow" in runway_val_str or "Positive" in runway_val_str or "+" in runway_val_str:
+                runway_color = "#2e7d32" # Verde brillante per Cash Flow Positivo
+                runway_val_str = "Cash Flow +" # Sostituita la stringa per evitare troncamenti grafici nelle card
+            else:
+                try:
                     r_val = float(runway_val_str.split()[0])
                     if r_val < 3.0:
                         runway_color = "#c62828" # Rosso (Sotto i 3 mesi)
@@ -1443,19 +1504,19 @@ with col3:
                         runway_color = "#f57f17" # Arancione (Tra 3 e 12 mesi)
                     else:
                         runway_color = "#2e7d32" # Verde (Sopra i 12 mesi)
-            except:
-                pass
+                except:
+                    pass
                 
             liq_val_str = sec_data.get('liquidity_test', ' - ')
             liq_color = "#333"
             try:
                 l_val = float(liq_val_str)
                 if l_val < 1.2:
-                    liq_color = "#c62828" # Rosso (Sotto 1.2)
+                    liq_color = "#c62828" # Rosso (Sotto 1.2 - Allerta Insolvenza)
                 elif l_val < 1.5:
                     liq_color = "#f57f17" # Arancione (Tra 1.2 e 1.5)
                 else:
-                    liq_color = "#2e7d32" # Verde (Sopra 1.5)
+                    liq_color = "#2e7d32" # Verde (Sopra 1.5 - Solvente)
             except:
                 pass
                 
@@ -1470,7 +1531,7 @@ with col3:
             except:
                 pass
 
-            # 2. CARTE METRICHE COMPATTE HTML (Font ridotto a 18px per un design pulito e cockpit a schede)
+            # 2. CARTE METRICHE COMPATTE HTML (Carattere ridotto a 18px per un cockpit a schede pulito e professionale)
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-bottom: 10px;'>📊 AUTONOMIA DI CASSA (CASH RUNWAY)</div>", unsafe_allow_html=True)
             
             # Griglia di metriche superiori (Cassa, Burn, Runway)
@@ -1486,7 +1547,7 @@ with col3:
                 </div>
                 <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
                     <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Autonomia di cassa in mesi prima del completo esaurimento delle riserve (Sotto i 3 mesi: Rosso, Sotto i 12 mesi: Arancione, Sopra i 12: Verde).">Runway Cassa ℹ️</div>
-                    <div style="font-size: 18px; font-weight: bold; color: {runway_color};">{sec_data.get('runway_months', ' - ')}</div>
+                    <div style="font-size: 18px; font-weight: bold; color: {runway_color};">{runway_val_str}</div>
                 </div>
             </div>
             """
@@ -1500,16 +1561,16 @@ with col3:
                     <div style="font-size: 18px; font-weight: bold; color: {ratio_color};">{sec_data.get('current_assets_ratio', ' - ')}</div>
                 </div>
                 <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Cassa divisa per passività correnti (debiti entro l'anno). Sotto 1.2 o 1.5 indica alto rischio di insolvenza immediata e diluizione forzata (Rosso).">Liquidity Test Ratio ℹ️</div>
+                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Cassa liquida divisa per le passività correnti (debiti entro l'anno). Sotto 1.2 indica alto rischio di insolvenza immediata e diluizione forzata (Rosso).">Liquidity Test Ratio ℹ️</div>
                     <div style="font-size: 18px; font-weight: bold; color: {liq_color};">{sec_data.get('liquidity_test', ' - ')}</div>
                 </div>
             </div>
             """
             st.markdown(metrics_bottom_html, unsafe_allow_html=True)
             
-            # 3. Offering attive (Badge e allineamento)
+            # 3. Offring attive (Badge e allineamento) con il remind spostato elegantemente nell'help tooltip di st.markdown
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 15px; margin-bottom: 5px;'>⚠️ STATO REGISTRAZIONI & OFFERINGS</div>", unsafe_allow_html=True)
-            offering_box_html = f'<div style="background-color: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; font-size: 13px;"><div style="margin-bottom: 4px;"><b>Stato Offering</b>: {sec_data.get("active_offering", " - ")}</div><div><b>Dilution Alert</b>: Se l\'autonomia o il test di liquidità indicano livelli critici (Rosso), la società ha altissime probabilità di diluire a breve. Informazioni dettagliate disponibili nel tooltip ℹ️ delle schede superiori.</div></div>'
+            offering_box_html = f'<div style="background-color: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; font-size: 13px;" title="Dilution Alert: Se l\'autonomia della cassa o il test di liquidità indicano livelli critici (Rosso), la società ha altissime probabilità di diluire nel brevissimo periodo per far fronte alle passività correnti."><div style="margin-bottom: 4px;"><b>Stato Offering ℹ️</b>: {sec_data.get("active_offering", " - ")}</div><div>Passa il mouse per visualizzare il Dilution Alert sulla solvibilità della società.</div></div>'
             st.markdown(offering_box_html, unsafe_allow_html=True)
             
             # 4. Tabella degli ultimi link ai depositi SEC (Link in nuove schede con stringhe piatte)
