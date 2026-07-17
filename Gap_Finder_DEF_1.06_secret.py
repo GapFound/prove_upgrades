@@ -25,6 +25,7 @@ import streamlit.components.v1 as components
 import pickle
 import os
 import sys
+import textwrap
 
 # INIZIALIZZAZIONE DELLA SESSIONE GLOBALE PER EVITARE I BLOCCHI DI YAHOO FINANCE
 session = requests.Session()
@@ -34,12 +35,151 @@ session.headers.update({
 
 #%%
 
-# FUNZIONE HELPER PER SCARICARE IL PROFILO AZIENDALE DA MASSIVE/POLYGON CON MAPPATURA MACRO-SETTORI SEC
+# FUNZIONE UTILITY PER FORMATTARE I VALORI NUMERICI IN MILIONI O MILIARDI
+def format_millions(val):
+    if val is None:
+        return ' - '
+    try:
+        val = float(val)
+        if val >= 10**9:
+            return f"${val/10**9:.2f}B"
+        elif val >= 10**6:
+            return f"${val/10**6:.2f}M"
+        elif val >= 10**3:
+            return f"${val/10**3:.2f}K"
+        return f"${val:.2f}"
+    except:
+        return ' - '
+
+# FUNZIONE PER SCARICARE I DATI DI CASSA E RISK DILUTION DIRETTAMENTE DALLA SEC EDGAR (100% GRATUITA ED ILLIMITATA)
+def fetch_sec_data(cik):
+    default_sec = {
+        'cash_on_hand': ' - ',
+        'monthly_burn': ' - ',
+        'runway_months': ' - ',
+        'risk_status': 'UNKNOWN',
+        'active_offering': 'Nessuna offering pendente registrata di recente',
+        'sec_links': []
+    }
+    if not cik or str(cik).strip() in ['', '-', ' - ']:
+        return default_sec
+        
+    try:
+        cik_str = str(cik).strip().zfill(10)
+        # SEC richiede obbligatoriamente un User-Agent identificativo chiaro
+        headers = {'User-Agent': 'Luca Loiacono lucaloia@gmail.com'}
+        
+        # 1. Recupero dati finanziari (Company Facts) per Cash & Burn Rate
+        facts_url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik_str}.json"
+        facts_res = requests.get(facts_url, headers=headers)
+        
+        cash_val = None
+        monthly_burn = 0.0
+        
+        if facts_res.status_code == 200:
+            facts = facts_res.json()
+            us_gaap = facts.get('facts', {}).get('us-gaap', {})
+            
+            # Cerchiamo la voce di cassa liquida disponibile usando le tassonomie XBRL standard
+            cash_data = us_gaap.get('CashAndCashEquivalentsAtCarryingValue') or us_gaap.get('CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents')
+            if cash_data:
+                units = cash_data.get('units', {}).get('USD', [])
+                quarterly_units = [u for u in units if u.get('form') in ['10-Q', '10-K']]
+                if len(quarterly_units) >= 1:
+                    cash_val = float(quarterly_units[-1]['val'])
+                    
+                # Calcolo del burn rate effettivo confrontando la cassa degli ultimi due trimestri registrati
+                if len(quarterly_units) >= 2:
+                    latest_cash = float(quarterly_units[-1]['val'])
+                    prev_cash = float(quarterly_units[-2]['val'])
+                    cash_change = prev_cash - latest_cash # Se positivo indica diminuzione (bruciatura di cassa)
+                    if cash_change > 0:
+                        monthly_burn = cash_change / 3.0
+        
+        # 2. Recupero moduli depositati (Submissions) per trovare Offering attive negli ultimi 6 mesi
+        sub_url = f"https://data.sec.gov/submissions/CIK{cik_str}.json"
+        sub_res = requests.get(sub_url, headers=headers)
+        
+        active_offering = "Nessuna offering pendente registrata di recente"
+        sec_links = []
+        risk_status = "GREEN" # Default in salute
+        
+        if sub_res.status_code == 200:
+            sub_data = sub_res.json()
+            recent = sub_data.get('filings', {}).get('recent', {})
+            
+            forms = recent.get('form', [])
+            dates = recent.get('filingDate', [])
+            accessions = recent.get('accessionNumber', [])
+            primary_docs = recent.get('primaryDocument', [])
+            
+            offering_forms = ["S-1", "S-3", "424B3", "424B4", "424B5", "424B7", "S-1/A", "S-3/A"]
+            found_offering = False
+            links_count = 0
+            
+            # Cerchiamo offering e raccogliamo gli ultimi 3 link rilevanti dei depositi
+            for i in range(len(forms)):
+                form_type = forms[i]
+                filing_date = dates[i]
+                acc_no = accessions[i].replace('-', '')
+                doc = primary_docs[i]
+                sec_link = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc_no}/{doc}"
+                
+                if form_type in ["10-K", "10-Q", "S-1", "S-3", "424B3", "424B5"]:
+                    if links_count < 3:
+                        sec_links.append({
+                            'date': filing_date,
+                            'form': form_type,
+                            'link': sec_link
+                        })
+                        links_count += 1
+                        
+                if form_type in offering_forms and not found_offering:
+                    # Controlliamo che l'offering sia recente (ultimi 6 mesi = 180 giorni)
+                    try:
+                        filing_dt = datetime.strptime(filing_date, "%Y-%m-%d").date()
+                        if (datetime.now().date() - filing_dt).days <= 180:
+                            active_offering = f"⚠️ Form {form_type} depositato il {filing_date}"
+                            risk_status = "RED" # Scatta l'allerta rossa di diluizione attiva
+                            found_offering = True
+                    except:
+                        pass
+        
+        # Calcolo finale dell'autonomia di Cassa (Runway)
+        runway_str = " - "
+        if cash_val is not None:
+            if monthly_burn > 0:
+                runway_val = cash_val / monthly_burn
+                runway_str = f"{runway_val:.2f} Mesi"
+                if runway_val < 6.0:
+                    risk_status = "RED" # Cassa sotto i 6 mesi: Pericolo critico
+                elif runway_val < 12.0 and risk_status != "RED":
+                    risk_status = "YELLOW"
+            else:
+                runway_str = "Cash Flow Positive"
+                if risk_status != "RED":
+                    risk_status = "GREEN"
+                    
+        return {
+            'cash_on_hand': format_millions(cash_val) if cash_val is not None else ' - ',
+            'monthly_burn': format_millions(monthly_burn) if monthly_burn > 0 else ' - ',
+            'runway_months': runway_str,
+            'risk_status': risk_status,
+            'active_offering': active_offering,
+            'sec_links': sec_links
+        }
+    except Exception as e:
+        print("Errore estrazione SEC EDGAR:", e)
+        
+    return default_sec
+
+# FUNZIONE HELPER PER SCARICARE IL PROFILO AZIENDALE DA MASSIVE/POLYGON CON MAPPATURA MACRO-SETTORI E PAESI ISO
 def fetch_polygon_profile(nome_ticker):
     default_profile = {
-        'nationality_exchange': {'nation': " - ", 'exchange': " - "},
+        'nationality_exchange': {'nation': " - ", 'nation_full': " - ", 'exchange': " - "},
         'sector_industry': {'sector': ' - ', 'industry': ' - '},
-        'website': ''
+        'website': '',
+        'cik': ''
     }
     try:
         # Supporta sia POLYGON_api_key che MASSIVE_api_key nei secrets
@@ -99,168 +239,84 @@ def fetch_polygon_profile(nome_ticker):
             if sector == " - ":
                 sector = sic_desc
                 
+            raw_locale = results.get('locale', 'US').upper()
+            
+            # DIZIONARIO OMNICOMPRENSIVO STANDARD ISO 3166-1 alpha-2
+            country_map = {
+                "AD": "Andorra", "AE": "United Arab Emirates", "AF": "Afghanistan", "AG": "Antigua and Barbuda",
+                "AI": "Anguilla", "AL": "Albania", "AM": "Armenia", "AO": "Angola", "AQ": "Antarctica",
+                "AR": "Argentina", "AS": "American Samoa", "AT": "Austria", "AU": "Australia", "AW": "Aruba",
+                "AX": "Åland Islands", "AZ": "Azerbaijan", "BA": "Bosnia and Herzegovina", "BB": "Barbados",
+                "BD": "Bangladesh", "BE": "Belgium", "BF": "Burkina Faso", "BG": "Bulgaria", "BH": "Bahrain",
+                "BI": "Burundi", "BJ": "Benin", "BL": "Saint Barthélemy", "BM": "Bermuda", "BN": "Brunei",
+                "BO": "Bolivia", "BQ": "Bonaire, Sint Eustatius and Saba", "BR": "Brazil", "BS": "Bahamas",
+                "BT": "Bhutan", "BV": "Bouvet Island", "BW": "Botswana", "BY": "Belarus", "BZ": "Belize",
+                "CA": "Canada", "CC": "Cocos (Keeling) Islands", "CD": "Congo (DRC)", "CF": "Central African Republic",
+                "CG": "Congo (Republic)", "CH": "Switzerland", "CI": "Côte d'Ivoire", "CK": "Cook Islands",
+                "CL": "Chile", "CM": "Cameroon", "CN": "China", "CO": "Colombia", "CR": "Costa Rica",
+                "CU": "Cuba", "CV": "Cabo Verde", "CW": "Curaçao", "CX": "Christmas Island", "CY": "Cyprus",
+                "CZ": "Czechia", "DE": "Germany", "DJ": "Djibouti", "DK": "Denmark", "DM": "Dominica",
+                "DO": "Dominican Republic", "DZ": "Algeria", "EC": "Ecuador", "EE": "Estonia", "EG": "Egypt",
+                "EH": "Western Sahara", "ER": "Eritrea", "ES": "Spain", "ET": "Ethiopia", "FI": "Finland",
+                "FJ": "Fiji", "FK": "Falkland Islands", "FM": "Micronesia", "FO": "Faroe Islands", "FR": "France",
+                "GA": "Gabon", "GB": "United Kingdom", "GD": "Grenada", "GE": "Georgia", "GF": "French Guiana",
+                "GG": "Guernsey", "GH": "Ghana", "GI": "Gibraltar", "GL": "Greenland", "GM": "Gambia",
+                "GN": "Guinea", "GP": "Guadeloupe", "GQ": "Equatorial Guinea", "GR": "Greece",
+                "GS": "South Georgia & South Sandwich Islands", "GT": "Guatemala", "GU": "Guam", "GW": "Guinea-Bissau",
+                "GY": "Government of Guyana", "HK": "Hong Kong", "HM": "Heard Island and McDonald Islands", "HN": "Honduras",
+                "HR": "Croatia", "HT": "Haiti", "HU": "Hungary", "ID": "Indonesia", "IE": "Ireland",
+                "IL": "Israel", "IM": "Isle of Man", "IN": "India", "IO": "British Indian Ocean Territory",
+                "IQ": "Iraq", "IR": "Iran", "IS": "Iceland", "IT": "Italy", "JE": "Jersey", "JM": "Jamaica",
+                "JO": "Jordan", "JP": "Japan", "KE": "Kenya", "KG": "Kyrgyzstan", "KH": "Cambodia",
+                "KI": "Kiribati", "KM": "Comoros", "KN": "Saint Kitts and Nevis", "KP": "North Korea",
+                "KR": "South Korea", "KW": "Kuwait", "KY": "Cayman Islands", "KZ": "Kazakhstan",
+                "LA": "Laos", "LB": "Lebanon", "LC": "Saint Lucia", "LI": "Liechtenstein", "LK": "Sri Lanka",
+                "LR": "Liberia", "LS": "Lesotho", "LT": "Lithuania", "LU": "Luxembourg", "LV": "Latvia",
+                "LY": "Libya", "MA": "Morocco", "MC": "Monaco", "MD": "Moldova", "ME": "Montenegro",
+                "MF": "Saint Martin", "MG": "Madagascar", "MH": "Marshall Islands", "MK": "North Macedonia",
+                "ML": "Mali", "MM": "Myanmar", "MN": "Mongolia", "MO": "Macao", "MP": "Northern Mariana Islands",
+                "MQ": "Martinique", "MR": "Mauritania", "MS": "Montserrat", "MT": "Malta", "MU": "Mauritius",
+                "MV": "Maldives", "MW": "Malawi", "MX": "Mexico", "MY": "Malaysia", "MZ": "Mozambique",
+                "NA": "Namibia", "NC": "New Caledonia", "NE": "Niger", "NF": "Norfolk Island", "NG": "Nigeria",
+                "NI": "Nicaragua", "NL": "Netherlands", "NO": "Norway", "NP": "Nepal", "NR": "Nauru",
+                "NU": "Niue", "NZ": "New Zealand", "OM": "Oman", "PA": "Panama", "PE": "Peru", "PF": "French Polynesia",
+                "PG": "Papua New Guinea", "PH": "Philippines", "PK": "Pakistan", "PL": "Poland",
+                "PM": "Saint Pierre and Miquelon", "PN": "Pitcairn Islands", "PR": "Puerto Rico", "PS": "Palestine",
+                "PT": "Portugal", "PW": "Palau", "PY": "Paraguay", "QA": "Qatar", "RE": "Réunion", "RO": "Romania",
+                "RS": "Serbia", "RU": "Russia", "RW": "Rwanda", "SA": "Saudi Arabia", "SB": "Solomon Islands",
+                "SC": "Seychelles", "SD": "Sudan", "SE": "Sweden", "SG": "Singapore", "SH": "Saint Helena",
+                "SI": "Slovenia", "SJ": "Svalbard and Jan Mayen", "SK": "Slovakia", "SL": "Sierra Leone",
+                "SM": "San Marino", "SN": "Senegal", "SO": "Somalia", "SR": "Suriname", "SS": "South Sudan",
+                "ST": "São Tomé and Príncipe", "SV": "El Salvador", "SX": "Sint Maarten", "SY": "Syria",
+                "SZ": "Eswatini", "TC": "Turks and Caicos Islands", "TD": "Chad", "TF": "French Southern Territories",
+                "TG": "Togo", "TH": "Thailand", "TJ": "Tajikistan", "TK": "Tokelau", "TL": "Timor-Leste",
+                "TM": "Turkmenistan", "TN": "Tunisia", "TO": "Tonga", "TR": "Turkey", "TT": "Trinidad and Tobago",
+                "TV": "Tuvalu", "TW": "Taiwan", "TZ": "Tanzania", "UA": "Ukraine", "UG": "Uganda",
+                "UM": "U.S. Outlying Islands", "US": "United States", "UY": "Uruguay", "UZ": "Uzbekistan",
+                "VA": "Vatican City", "VC": "Saint Vincent and the Grenadines", "VE": "Venezuela",
+                "VG": "British Virgin Islands", "VI": "U.S. Virgin Islands", "VN": "Vietnam", "VU": "Vanuatu",
+                "WF": "Wallis and Futuna", "WS": "Samoa", "YE": "Yemen", "YT": "Mayotte", "ZA": "South Africa",
+                "ZM": "Zambia", "ZW": "Zimbabwe"
+            }
+            nation_full = country_map.get(raw_locale, raw_locale)
+            
             return {
                 'nationality_exchange': {
-                    'nation': results.get('locale', 'US').upper(),
+                    'nation': raw_locale,
+                    'nation_full': nation_full,
                     'exchange': exchange_cleaned
                 },
                 'sector_industry': {
                     'sector': sector,
                     'industry': sic_desc
                 },
-                'website': results.get('homepage_url', '')
+                'website': results.get('homepage_url', ''),
+                'cik': results.get('cik', '') # Estraiamo ed inviamo in cache il CIK
             }
     except Exception as e:
         print("Errore chiamata Polygon/Massive:", e)
         
     return default_profile
-
-# FUNZIONE PERSONALIZZATA PER LA BARRA DI SCROLL ORIZZONTALE SULLE TABELLE
-def render_table_with_slider(
-    df,
-    min_rows: int = 6,
-    max_rows: int = 24,
-    row_px: int = 26,
-    header_px: int = 34,
-    padding_px: int = 14,
-    key: str = "tbl",
-    escape: bool = True,
-):
-    try:
-        df2 = df.copy()
-        df2.index = range(1, len(df2) + 1)
-        df2.index.name = ""
-    except Exception:
-        df2 = df
-
-    html_table = df2.to_html(border=0, classes="gf-table", index=True, escape=escape)
-
-    rows = int(df2.shape[0])
-    target_rows = max(min_rows, min(rows, max_rows))
-    scroller_h = header_px + row_px * target_rows + padding_px
-    component_h = scroller_h + 36
-
-    html = f"""
-    <div id="gf-wrap-{key}" style="
-      position:relative; z-index:2147483000;
-      width:100%; max-width:100%;
-      box-sizing:border-box; overflow:visible;
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
-
-      <div id="gf-scroller-{key}" style="
-        overflow-y:auto; overflow-x:hidden;
-        border:1px solid #ddd; height:{scroller_h}px;
-        width:100%; max-width:100%; box-sizing:border-box;
-        padding-bottom:2px; padding-right:2px;">
-        <div id="gf-content-{key}">
-          {html_table}
-        </div>
-      </div>
-
-      <div id="gf-slider-wrap-{key}" class="gf-slider">
-        <div class="gf-track"></div>
-        <div id="gf-fill-{key}" class="gf-fill"></div>
-        <div id="gf-handle-{key}" class="gf-handle"></div>
-        <input id="gf-range-{key}" class="gf-range-ghost" type="range" min="0" max="1000" value="0">
-      </div>
-    </div>
-
-    <style>
-      #gf-wrap-{key} table {{
-        border-collapse: separate; border-spacing:0;
-        width: max-content;
-        max-width: calc(100% - 4px);
-        font-size:11.5px;
-      }}
-      #gf-wrap-{key} th, #gf-wrap-{key} td {{
-        padding:6px 4.6px;
-        white-space:nowrap;
-        border-bottom:1px solid #eee;
-        border-right:1px solid #eee;
-      }}
-      #gf-wrap-{key} th:last-child, #gf-wrap-{key} td:last-child {{ border-right:none; }}
-      #gf-wrap-{key} thead th {{
-        position: sticky; top: 0;
-        background:#fafafa; z-index:1;
-      }}
-      #gf-wrap-{key} thead th:first-child,
-      #gf-wrap-{key} tbody td:first-child {{
-        text-align:center;
-        width:26px; min-width:26px; max-width:26px;
-        color:#444;
-      }}
-      #gf-scroller-{key} {{
-        -ms-overflow-style: none;        
-        scrollbar-width: none;           
-      }}
-      #gf-scroller-{key}::-webkit-scrollbar:horizontal {{ height:0px; display:none; }}  
-
-      .gf-slider {{ position:relative; height:34px; margin-top:2px; z-index:2147483200; overflow:visible; }}
-      .gf-track  {{ position:absolute; left:10px; right:10px; top:40%; height:3px; background:#e5e7eb; transform:translateY(-50%); border-radius:2px; z-index:1; }}
-      .gf-fill   {{ position:absolute; left:10px; top:40%; height:3px; background:#d00; transform:translateY(-50%); border-radius:2px; width:0px; z-index:2; }}
-      .gf-handle {{ position:absolute; top:40%; width:12px; height:12px; background:#d00; border:2px solid #fff; border-radius:50%; transform:translate(-50%,-50%); left:10px; box-shadow:0 0 0 1px rgba(0,0,0,.15); cursor:grab; z-index:2147483400; }}
-      .gf-handle:active {{ cursor:grabbing; }}
-      .gf-range-ghost {{ position:absolute; left:0; right:0; top:0; bottom:0; width:100%; height:100%; opacity:0; cursor:ew-resize; z-index:2147483300; }}
-    </style>
-
-    <script>
-      const scroller  = document.getElementById("gf-scroller-{key}");
-      const content   = document.getElementById("gf-content-{key}");
-      const rangeEl   = document.getElementById("gf-range-{key}");
-      const fillEl    = document.getElementById("gf-fill-{key}");
-      const handleEl  = document.getElementById("gf-handle-{key}");
-      const sliderBox = document.getElementById("gf-slider-wrap-{key}");
-      const PADDING = 10;
-
-      function maxScrollX() {{ return Math.max(0, content.scrollWidth - scroller.clientWidth); }}
-      function usableWidth() {{ return Math.max(0, sliderBox.clientWidth - 2*PADDING); }}
-
-      function applyPct(pct) {{
-        const W = usableWidth();
-        const x = PADDING + (pct/100) * W;
-        fillEl.style.width = (x - PADDING) + "px";
-        handleEl.style.left = x + "px";
-      }}
-
-      function syncSliderFromScroll() {{
-        const m = maxScrollX();
-        if (m <= 0) {{ rangeEl.disabled = true; applyPct(0); return; }}
-        rangeEl.disabled = false;
-        const pct = (scroller.scrollLeft / m) * 100;
-        rangeEl.value = Math.round((pct/100) * 1000);
-        applyPct(pct);
-      }}
-
-      function syncScrollFromSlider() {{
-        const m = maxScrollX();
-        const pct = (rangeEl.value / 1000) * 100;
-        scroller.scrollLeft = (pct/100) * m;   
-        applyPct(pct);
-      }}
-
-      let dragging = false;
-      handleEl.addEventListener("mousedown", () => dragging = true);
-      window.addEventListener("mouseup",   () => dragging = false);
-      window.addEventListener("mousemove", (e) => {{
-        if (!dragging) return;
-        const rect = sliderBox.getBoundingClientRect();
-        let x = Math.min(Math.max(e.clientX - rect.left, PADDING), rect.width - PADDING);
-        const pct = ((x - PADDING) / (rect.width - 2*PADDING)) * 100;
-        rangeEl.value = Math.round((pct/100) * 1000);
-        syncScrollFromSlider();
-      }});
-
-      scroller.addEventListener("scroll", syncSliderFromScroll);
-      rangeEl.addEventListener("input",  syncScrollFromSlider);
-      rangeEl.addEventListener("change", syncScrollFromSlider);
-
-      new ResizeObserver(syncSliderFromScroll).observe(content);
-      new ResizeObserver(syncSliderFromScroll).observe(sliderBox);
-      window.addEventListener("load", syncSliderFromScroll);
-      setTimeout(syncSliderFromScroll, 120);
-    </script>
-    """
-    components.html(html, height=component_h, scrolling=False)
 
 #%%
 
@@ -413,26 +469,62 @@ def fondamentali_func(nome_ticker):
         website = ""
         fondamentali_yf = {market_cap: ' - ', outstanding: ' - ', shares_float: ' - ', insider_own: ' - ', inst_own: ' - ', short_float: ' - ' }
      
-    # Carichiamo direttamente il profilo (Settore, Exchange, Website) gestito dalla Cache in datagathering_func
+    # Carichiamo direttamente il profilo (Settore, Exchange, Website, Nazione) gestito dalla Cache in datagathering_func
     cached_profile = st.session_state.get('cached_profile', None)
-    if cached_profile:
-        nationality_exchange = cached_profile['nationality_exchange']
-        sector_industry = cached_profile['sector_industry']
+    
+    # Inizializzazione sicura dei valori di default
+    nationality_exchange = {'nation': " - ", 'nation_full': " - ", 'exchange': " - "}
+    sector_industry = {'sector': ' - ', 'industry': ' - '}
+    
+    # Se il profilo in cache è un dizionario valido, lo processiamo in sicurezza per evitare KeyError/TypeError da cache corrotte
+    if isinstance(cached_profile, dict):
+        raw_nat_exc = cached_profile.get('nationality_exchange')
+        if isinstance(raw_nat_exc, dict):
+            nationality_exchange = raw_nat_exc
+            
+            # SUPER FALLBACK: Se nation_full è assente o è un trattino vuoto, lo ricalcoliamo all'istante dalla sigla 'nation'
+            if 'nation_full' not in nationality_exchange or nationality_exchange.get('nation_full') in [' - ', '---', '-', '', None]:
+                raw_locale = nationality_exchange.get('nation', 'US')
+                if not isinstance(raw_locale, str):
+                    raw_locale = 'US'
+                raw_locale = raw_locale.upper()
+                
+                country_map_short = {
+                    "US": "United States", "CN": "China", "KY": "Cayman Islands", 
+                    "GB": "United Kingdom", "CA": "Canada", "IL": "Israel", 
+                    "SG": "Singapore", "HK": "Hong Kong", "AU": "Australia"
+                }
+                nationality_exchange['nation_full'] = country_map_short.get(raw_locale, raw_locale)
+            
+        raw_sec_ind = cached_profile.get('sector_industry')
+        if isinstance(raw_sec_ind, dict):
+            sector_industry = raw_sec_ind
+            
         if not website:
-            website = cached_profile['website']
-    else:
-        nationality_exchange = {'nation': " - ", 'exchange': " - "}
-        sector_industry = {'sector': ' - ', 'industry': ' - '}
+            website = cached_profile.get('website', '')
         
-    # Eliminiamo completamente Finviz per non avere crash o latenza. Lasciamo la colonna Fz vuota con trattini per mantenere intatta la tabella
+    # 3. Fondamentali da Finviz (riattivato usando la libreria standard che viene catturata in try/except)
     fondamentali_fz = {
-        market_cap: ' - ',
-        outstanding: ' - ',   
-        shares_float: ' - ',
-        insider_own: ' - ',
-        inst_own: ' - ',
-        short_float: ' - ' 
+        market_cap: ' - ', outstanding: ' - ', shares_float: ' - ',
+        insider_own: ' - ', inst_own: ' - ', short_float: ' - ' 
     }
+    try:
+        stock = finvizfinance(nome_ticker)
+        finvitz_data = stock.ticker_fundament()
+        
+        def prendi_voce(voce):
+            return finvitz_data.get(voce, ' - ')
+            
+        fondamentali_fz = {
+            market_cap: prendi_voce('Market Cap'),
+            outstanding: prendi_voce('Shs Outstand'),
+            shares_float: prendi_voce('Shs Float'),
+            insider_own: prendi_voce('Insider Own'),
+            inst_own: prendi_voce('Inst Own'),
+            short_float: prendi_voce('Short Float')
+        }
+    except Exception as e:
+        print("Errore caricamento Finviz:", e)
         
     fond_fz_df = pd.DataFrame({'a': fondamentali_fz.keys(), 'Fz': fondamentali_fz.values()})
     fond_yf_df = pd.DataFrame({'a': fondamentali_yf.keys(), 'Yf': fondamentali_yf.values()})
@@ -480,7 +572,7 @@ def datagathering_func(nome_ticker):
         
     if os.path.exists(cache_file):
           with open(cache_file, "rb") as fp:
-              print(f"Caricamento dati daily, splits e profilo {nome_ticker} dalla cache.")
+              print(f"Caricamento dati daily, splits, profilo e SEC {nome_ticker} dalla cache.")
               cache_data = pickle.load(fp)
               dati_storici = cache_data['dati_storici']
               splits_format = cache_data['splits']
@@ -488,10 +580,15 @@ def datagathering_func(nome_ticker):
               
               profile_data = cache_data.get('profile', None)
               
-              # LAZY-LOAD INTELLIGENTE: Se il profilo manca nel vecchio file .pkl, lo scarichiamo una volta sola e ri-salviamo il file .pkl
-              if profile_data is None and not dati_storici.empty:
-                  print("Profilo mancante nella vecchia cache. Eseguo lazy-load da Massive/Polygon.")
-                  profile_data = fetch_polygon_profile(nome_ticker)
+              # LAZY-LOAD INTELLIGENTE: Se il profilo o i dati SEC mancano nel vecchio file .pkl, lo scarichiamo una volta sola e ri-salviamo il file .pkl
+              if (profile_data is None or 'sec_data' not in profile_data) and not dati_storici.empty:
+                  print("Profilo o dati SEC mancanti nella vecchia cache. Eseguo lazy-load da Massive/Polygon e SEC.")
+                  if profile_data is None:
+                      profile_data = fetch_polygon_profile(nome_ticker)
+                  # Scarica i dati finanziari SEC usando il CIK in sicurezza
+                  sec_metrics = fetch_sec_data(profile_data.get('cik', ''))
+                  profile_data['sec_data'] = sec_metrics
+                  
                   try:
                       cache_data['profile'] = profile_data
                       with open(cache_file, 'wb') as out_fp:
@@ -503,9 +600,15 @@ def datagathering_func(nome_ticker):
               caricato = 1
    
     if caricato == 0:
-        # Ticker totalmente nuovo: scarichiamo il profilo da MASSIVE/Polygon una volta sola e lo scriviamo in cache
+        # Ticker totalmente nuovo: scarichiamo il profilo da MASSIVE/Polygon ed i dati SEC una sola volta e lo scriviamo in cache
         print("Nuovo Ticker. Scarico il profilo da Massive/Polygon.")
         fmp_profile = fetch_polygon_profile(nome_ticker)
+        
+        # Scarica i dati finanziari SEC usando il CIK in sicurezza
+        print("Scarico i dati di cassa e diluizione reali da SEC EDGAR.")
+        sec_metrics = fetch_sec_data(fmp_profile.get('cik', ''))
+        fmp_profile['sec_data'] = sec_metrics
+        
         st.session_state['cached_profile'] = fmp_profile
         
         try:     
@@ -556,12 +659,13 @@ def datagathering_func(nome_ticker):
                     '4. close': 'Close',
                     '5. volume': 'Volume'}, inplace=True)
                 
+                # SPOSTATA DEFINITIVAMENTE LA CONVERSIONE NUMERICA DENTRO LA PROTEZIONE DI SICUREZZA PER PREVENIRE IL KEYERROR
+                cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+                dati_storici[cols] = dati_storici[cols].apply(pd.to_numeric, errors='coerce')
+                dati_storici.sort_index(ascending=True, inplace=True) 
+                
             print('prima delle trasformazioni')
-            print(dati_storici[:5].to_string())
-            
-            cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-            dati_storici[cols] = dati_storici[cols].apply(pd.to_numeric, errors='coerce')
-            dati_storici.sort_index(ascending=True, inplace=True) 
+            print(dati_storici[:5].to_string() if not dati_storici.empty else "Dati vuoti")
             
         if not dati_storici.empty:    
              dati_storici.index = pd.to_datetime(dati_storici.index).normalize()
@@ -660,123 +764,6 @@ def ricerca_gaps(nome_ticker, dati_storici, gap_perc_A, gap_perc_B, volume, prez
     else: 
         print(f' il titolo {nome_ticker} non ha nessun gap superiore o uguale al {gap_perc_A}%')
         return gaps
-        
-#%%
-
-## VISUALIZZA IL GRAFICO DEL GAP
-
-def visual_gap(nome_ticker, n_gap, dati_storici_ADJ):
-    global gaps
-    finestra_daily = 100
-
-    elementi_da_inizio_df = gaps.index[n_gap]
-    if elementi_da_inizio_df > round(finestra_daily/2):
-        finestra_A = round(finestra_daily/2)
-    else:
-        finestra_A = elementi_da_inizio_df
-        
-    elementi_da_fine_df = (dati_storici_ADJ.shape[0])-elementi_da_inizio_df
-    if elementi_da_fine_df > round(finestra_daily/2):
-        finestra_B = round(finestra_daily/2)
-    else:
-        finestra_B = elementi_da_fine_df
-    
-    df = dati_storici_ADJ.iloc[gaps.index[n_gap]-(finestra_A)\
-                               :gaps.index[n_gap]+(finestra_B), :].copy()
-    
-    df['hover_text'] = (
-        "Data: " + df['Date'].astype(str) + "<br>" +
-        "Open: " + df['Open'].astype(str) + "<br>" +
-        "High: " + df['High'].astype(str) + "<br>" +
-        "Low: " + df['Low'].astype(str) + "<br>" +
-        "Close: " + df['Close'].astype(str) + "<br>" +
-        "Gap %: " + df['Gap %'].astype(str) + "<br>"
-    )
-    
-    df['volume_text'] = df.apply(lambda x: f"{x['Volume']:,.0f}".replace(",", "."), axis=1)
-    df['volume_text'] = ("Volume: "+df['volume_text'].astype(str))
-    
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        row_heights=[0.8, 0.2],
-        vertical_spacing= 0.15
-    )
-    
-    fig.add_trace(
-        go.Candlestick(
-            x=df['Date'],
-            open=df['Open'],
-            high=df['High'],
-            low=df['Low'],
-            close=df['Close'],
-            name="Daily",
-            hovertext=df['hover_text'],  
-            hoverinfo="text"  
-        ),
-        row=1, col=1
-    )
-    
-    fig.add_trace(
-        go.Bar(
-            x=df['Date'],
-            y=df['Volume'],
-            name="Volume",
-            hovertext=df['volume_text'],
-            hoverinfo="text",
-            marker_color='blue',
-            opacity=0.6
-        ),
-        row=2, col=1
-    )
-    
-    if finestra_A >= 5:
-        finestra_visione_A = 5 
-    else:
-        finestra_visione_A = finestra_A-1   
-    
-    if finestra_B >= 5:
-        finestra_visione_B = 5 
-    else:
-        finestra_visione_B = finestra_B-1
-    
-    fig.update_layout(
-        title=f"          <b>{nome_ticker.upper()}</b> -  Grafico Gap del    {gaps.iloc[n_gap, 0]}",
-        yaxis_title="Prezzo",
-        xaxis_rangeslider={'thickness': 0.08, 'visible': True},
-        template="plotly_white",
-        width=800,
-        height=600,
-        shapes=[
-            {
-                'type': "rect",
-                'xref': "x",
-                'yref': "paper",
-                'x0': df['Date'].loc[gaps.index[n_gap]],
-                'x1': df['Date'].loc[gaps.index[n_gap] - 1],
-                'y0': 0.80,
-                'y1': 0.40,
-                'fillcolor': 'Orange',
-                'opacity': 0.1,
-                'layer': "below",
-                'line_width': 0
-            }
-        ]
-    )
-    
-    fig.update_xaxes(
-        range=[
-            df['Date'].loc[gaps.index[n_gap] - finestra_visione_A], 
-            df['Date'].loc[gaps.index[n_gap] + finestra_visione_B]
-        ]
-    )
-    
-    st.plotly_chart(fig, use_container_width=False, config={
-        'displayModeBar': True,  
-        'responsive': True,      
-        'scrollZoom': True,      
-        'staticPlot': False     
-    })
 
 #%%    
         
@@ -944,19 +931,15 @@ with col1:
             else:
                 ticker_html = f"{nome_ticker.upper()}"
 
-            # ST.HTML CARICA DIRETTAMENTE EXCHANGE, SETTORE E INDUSTRIA DA MASSIVE/POLYGON SENZA RIPETIZIONI
-            st.html(f"""
-                <div style="font-size: 22px; font-weight: bold; margin-bottom: 2px;">
-                    {ticker_html}
-                </div>
-                <div style="font-size: 12px;"><b>{st.session_state['nationality_exchange']['nation']} - {st.session_state['nationality_exchange']['exchange']}</b></div>
-                <div style="font-size: 13px; font-weight: normal; color: #444;">
-                    {st.session_state['sector_industry']['sector']}
-                </div>
-                <div style="font-size: 13px; font-weight: normal; color: #444;">
-                    {st.session_state['sector_industry']['industry']}
-                </div>
-            """)
+            # ST.MARKDOWN BLINDATO: Stringhe piatte concatenate (senza andare a capo) per impedire a Streamlit di creare box grigi e consentire nuove schede
+            ticker_info_html = (
+                f'<div style="font-size: 22px; font-weight: bold; margin-bottom: 0px; line-height: 1.1;">{ticker_html}</div>'
+                f'<div style="font-size: 13.5px; font-weight: bold; color: #d00; margin-bottom: 8px;">{st.session_state.get("nationality_exchange", {}).get("nation_full", " - ")}</div>'
+                f'<div style="font-size: 12px; margin-bottom: 5px;"><b>{st.session_state.get("nationality_exchange", {}).get("nation", " - ")} - {st.session_state.get("nationality_exchange", {}).get("exchange", " - ")}</b></div>'
+                f'<div style="font-size: 13px; font-weight: normal; color: #444;">{st.session_state.get("sector_industry", {}).get("sector", " - ")}</div>'
+                f'<div style="font-size: 13px; font-weight: normal; color: #444;">{st.session_state.get("sector_industry", {}).get("industry", " - ")}</div>'
+            )
+            st.markdown(ticker_info_html, unsafe_allow_html=True)
 
             st.table(st.session_state['fondamentali'])
             print(st.session_state['fondamentali'])
@@ -1020,7 +1003,7 @@ with col2:
                # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER CON SCROLLER ORIZZONTALE SULLE TABELLE
                render_table_with_slider(v_gaps, key="gaps")
                
-               # CALCOLO E VISUALIZZAZIONE DELLE STATISTICHE DI CHIUSURA RED/GREEN DEI GAPPER FILTRATI
+               # CALCOLO E VISUALIZZAZIONE DELLE STATISTICHE DI CHIUSURA RED/GREEN DEI GAPPER FILTRATI (CON CONTEGGIO MINIMALISTA IN REGULAR)
                total_gaps = len(v_gaps)
                red_count = len(v_gaps[v_gaps['Chiusura'] == 'RED'])
                green_count = len(v_gaps[v_gaps['Chiusura'] == 'GREEN'])
@@ -1029,7 +1012,10 @@ with col2:
                green_pct = (green_count / total_gaps) * 100
                
                st.html(f"""
-                   <div style="text-align: center; font-size: 13.5px; margin-top: 10px; margin-bottom: 5px; font-weight: bold;">
+                   <div style="text-align: center; font-size: 15px; font-weight: normal; margin-top: 10px; margin-bottom: 2px;">
+                       {red_count} vs {green_count}
+                   </div>
+                   <div style="text-align: center; font-size: 13.5px; margin-top: 0px; margin-bottom: 5px; font-weight: bold;">
                        🟥 RED: {red_pct:.2f}% &nbsp;|&nbsp; GREEN: {green_pct:.2f}% 🟩
                    </div>
                """)
@@ -1041,11 +1027,11 @@ with col2:
                     </div>
                 """)
                
-           col2_4, col2_5, col2_6 = st.columns([0.20, 0.83, 0.14])
+           # SOTTO-COLONNE SIMMETRICHE PER CENTRARE PERFETTAMENTE IL BLOCCO DELLE NEWS SOTTO LE STATISTICHE
+           col2_4, col2_5, col2_6 = st.columns([0.10, 0.80, 0.10])
           
            with col2_5: 
                    st.write(""); st.write(""); st.write(""); st.write(""); st.write("")
-                   # ABBIAMO AGGIORNATO CON ST.HTML
                    st.html(f"""
                        <div style="text-align:center; font-size: 14px;">
                            <b>news:</b> <br/> <br/>
@@ -1053,7 +1039,7 @@ with col2:
                    """)
                                    
                    if isinstance(st.session_state['news'], pd.DataFrame):
-                           # ACCUMULATORE PER EVITARE GLI SPAZI VERTICALI NELLE NEWS
+                           # ACCUMULATORE PER EVITARE GLI SPAZI VERTICALI NELLE NEWS (STRINGHE PIATTE SENZA ANDARE A CAPO)
                            news_html = ""
                            for a, b in st.session_state['news'].iterrows():
                                ora = datetime.now().hour
@@ -1075,44 +1061,104 @@ with col2:
                                if not link.startswith('http'):
                                     link = "https://finviz.com/" + b['Link']
                                         
-                               # USATO ST.HTML CHE RISOLVE ALL'ORIGINE I BOX GRIGI
-                               news_html += f"""
-                                    <div style="text-align:left; font-size: 13px; margin-bottom: 6px; line-height: 1.3;">
-                                        <strong style="color: red;">{data_da_stampa}</strong>&nbsp;
-                                        <a href="{link}" style="text-decoration: none; color: inherit;">
-                                            {b['Title']}
-                                        </a>
-                                    </div>
-                               """
+                               # Scritto come stringa piatta su un'unica riga per impedire la generazione di box grigi ed attivare nuove schede
+                               news_html += f'<div style="text-align:left; font-size:13px; margin-bottom:6px; line-height:1.3;"><strong style="color:red;">{data_da_stampa}</strong>&nbsp;<a href="{link}" style="text-decoration:none; color:inherit;" target="_blank">{b["Title"]}</a></div>'
                            
-                           # STAMPATO UNICAMENTE UNA VOLTA FUORI DAL LOOP
-                           st.html(news_html)
+                           # STAMPATO UNICAMENTE UNA VOLTA FUORI DAL LOOP ATTRAVERSO ST.MARKDOWN
+                           st.markdown(news_html, unsafe_allow_html=True)
 
                    if isinstance(st.session_state['news'], str):
-                           # USATO ST.HTML
-                           st.html(f"""
-                               <div style="text-align:center; font-size: 14px;">
-                                   {st.session_state['news']}
-                               </div>
-                           """)
- 
-           if not v_gaps.empty:
-                with col3:
-                    col3_1, col3_2 = st.columns([0.18, 0.82])
-                    with col3_1:
-                        options = list(v_gaps.index)
-                        n_gap = st.selectbox('**gap da visualizzare**', options)
-                        
-                    if st.button('visualizza'):
-                        try:
-                            visual_gap(nome_ticker, (n_gap-1), st.session_state['dati_storici_ADJ'])
-                        except:
-                            # USATO ST.HTML
-                            st.html(f"""
-                                 <div style="text-align: center; font-size: 15px;">
-                                     grafico non disponibile
-                                 </div>
-                             """)
+                           # USATO ST.MARKDOWN PROTETTO CON STRINGA PIATTA
+                           news_str_html = f'<div style="text-align:center; font-size:14px;">{st.session_state["news"]}</div>'
+                           st.markdown(news_str_html, unsafe_allow_html=True)
+
+with col3:
+    # ---------------------------------------------------------------------------------
+    # LA PARTE DESTRA (COL3) DIVENTA ORA IL COCKPIT GRAFICO DI ANALISI DILUIZIONE & RISK SEC
+    # ---------------------------------------------------------------------------------
+    if 'dati_storici' in st.session_state and st.session_state['dati_storici'] is not None:
+        cached_profile = st.session_state.get('cached_profile', None)
+        sec_data = None
+        
+        # Recuperiamo i dati SEC normalizzati salvati all'interno della cache locale
+        if isinstance(cached_profile, dict):
+            sec_data = cached_profile.get('sec_data')
+            
+        if isinstance(sec_data, dict):
+            # 1. Box Grafico di Rischio in alto (con colori dinamici)
+            risk_status = sec_data.get('risk_status', 'UNKNOWN')
+            bg_color = "#f9f9f9"
+            border_color = "#ccc"
+            text_color = "#333"
+            risk_label = "RISK VERDICT: UNKNOWN STATUS"
+            
+            if risk_status == "RED":
+                bg_color = "#ffebee"
+                border_color = "#d32f2f"
+                text_color = "#c62828"
+                risk_label = f"🚨 RISK STATUS: CRITICAL DILUTION RISK"
+            elif risk_status == "YELLOW":
+                bg_color = "#fffde7"
+                border_color = "#fbc02d"
+                text_color = "#f57f17"
+                risk_label = f"⚠️ RISK STATUS: MEDIUM DILUTION RISK"
+            elif risk_status == "GREEN":
+                bg_color = "#e8f5e9"
+                border_color = "#388e3c"
+                text_color = "#2e7d32"
+                risk_label = f"✅ RISK STATUS: LOW DILUTION RISK"
+                
+            # Stampa il Badge Grafico in alto
+            st.html(f"""
+                <div style="background-color: {bg_color}; border-left: 5px solid {border_color}; padding: 12px; margin-top: 15px; margin-bottom: 20px; border-radius: 4px;">
+                    <span style="color: {text_color}; font-size: 15px; font-weight: bold;">{risk_label}</span><br>
+                    <span style="color: #37474f; font-size: 12px;">Analisi basata sulla runway trimestrale dei dati SEC e sul monitoraggio delle registrazioni di offering pendenti.</span>
+                </div>
+            """)
+            
+            # 2. Visualizzazione Grafica delle Metrics (Autonomia, Cassa, Burn) affiancate
+            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-bottom: 10px;'>📊 AUTONOMIA DI CASSA (CASH RUNWAY)</div>", unsafe_allow_html=True)
+            met1, met2, met3 = st.columns(3)
+            with met1:
+                st.metric(label="Cash on Hand (Cassa)", value=sec_data.get('cash_on_hand', ' - '), help="Ultima cassa liquida registrata nel report SEC.")
+            with met2:
+                st.metric(label="Monthly Burn (Spesa)", value=sec_data.get('monthly_burn', ' - '), help="Velocità di bruciatura cassa stimata su base mensile.")
+            with met3:
+                st.metric(label="Autonomia Runway", value=sec_data.get('runway_months', ' - '), help="Mesi di autonomia stimati prima dell'esaurimento completo della cassa.")
+                
+            # 3. Offring attive (Badge)
+            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 25px; margin-bottom: 5px;'>⚠️ STATO REGISTRAZIONI & OFFERINGS</div>", unsafe_allow_html=True)
+            st.html(f"""
+                <div style="background-color: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; font-size: 13px;">
+                    <div style="margin-bottom: 4px;"><b>Stato Offering</b>: {sec_data.get('active_offering', ' - ')}</div>
+                    <div><b>Dilution Alert</b>: Se l'autonomia è inferiore a 6 mesi, la società ha altissime probabilità di diluire nel brevissimo periodo.</div>
+                </div>
+            """)
+            
+            # 4. Tabella degli ultimi link ai depositi SEC (Link in nuove schede)
+            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 25px; margin-bottom: 8px;'>📂 ULTIMI DEPOSITI SEC EDGAR RILEVANTI</div>", unsafe_allow_html=True)
+            sec_links = sec_data.get('sec_links', [])
+            if sec_links:
+                sec_html = ""
+                for item in sec_links:
+                    sec_html += f"""
+                        <div style="font-size: 13px; margin-bottom: 5px; padding-bottom: 5px; border-bottom: 1px solid #f9f9f9;">
+                            <span style="color: #666;">[{item['date']}]</span>&nbsp;&nbsp;
+                            <strong style="color: #d00;">Form {item['form']}</strong>&nbsp;&nbsp;—&nbsp;&nbsp;
+                            <a href="{item['link']}" style="text-decoration: none; color: blue; font-weight: bold;" target="_blank">Apri Deposito su SEC 🔗</a>
+                        </div>
+                    """
+                st.markdown(textwrap.dedent(sec_html), unsafe_allow_html=True)
+            else:
+                st.write("Nessun deposito SEC recente catalogato per questo ticker.")
+        else:
+            # Se il CIK non esiste o Polygon non ha profilato il titolo (es. ETF o Warrants)
+            st.html(f"""
+                <div style="background-color: #f9f9f9; border-left: 5px solid #ccc; padding: 12px; margin-top: 15px; border-radius: 4px; font-size: 13.5px;">
+                    <b>Dati SEC Non Disponibili</b><br>
+                    Il titolo cercato non possiede un codice CIK o i dati di bilancio standard SEC non sono registrati (comune per Warrant, ETF, SPAC o OTC molto illiquidi).
+                </div>
+            """)
 
 st.markdown("""
     <style>
