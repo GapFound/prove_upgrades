@@ -1383,6 +1383,21 @@ with col2:
                            news_str_html = f'<div style="text-align:center; font-size:14px;">{st.session_state["news"]}</div>'
                            st.markdown(news_str_html, unsafe_allow_html=True)
 
+Ecco il blocco di codice corretto da sostituire all'interno della colonna 3
+(col3).
+
+Ho implementato l'estrazione dinamica della data direttamente dalla stringa
+'active_offering' (risolvendo il bug della cache di VEEE) [1.1.1], sbloccato la
+colorazione verde del Cash Flow + per AAPL [2.1], ed impostato i messaggi esatti
+dell'opportunità short basati sulle giornate e chiusure dei gap [2.1].
+
+Cosa sostituire nel tuo file:
+
+Trova la sezione with col3: (intorno alla riga 790 in fondo al file su GitHub) e
+sostituisci tutto ciò che c'è sotto quel blocco fino alla fine del file con
+questo codice corretto:
+
+
 with col3:
     # ---------------------------------------------------------------------------------
     # LA PARTE DESTRA (COL3) DIVENTA ORA IL COCKPIT GRAFICO DI ANALISI DILUIZIONE & RISK SEC (FORMATTAZIONE OTTIMIZZATA DI LUCA)
@@ -1396,8 +1411,12 @@ with col3:
             sec_data = cached_profile.get('sec_data')
             
         if isinstance(sec_data, dict):
-            # ANALISI CRONOLOGICA DI DIGESTIONE DELL'OFFERING RISPETTO AI GAP REALI (SHORT EDGE DI LUCA)
-            offering_date_str = sec_data.get('active_offering_date')
+            # ESTRAZIONE DINAMICA DELLA DATA DALLA STRINGA PER EVITARE CONFLITTI DI CACHE
+            active_offering_str = sec_data.get('active_offering', ' - ')
+            offering_date_str = None
+            if "depositato il" in active_offering_str:
+                offering_date_str = active_offering_str.split("depositato il")[-1].strip()
+                
             short_edge = "UNKNOWN"
             edge_msg = "Analisi basata sulla runway trimestrale dei dati SEC e sul monitoraggio delle registrazioni di offering pendenti."
             
@@ -1424,7 +1443,7 @@ with col3:
                         
                         if gaps_after.empty:
                             short_edge = "CRITICAL"
-                            edge_msg = f"SHORT EDGE MASSIMO — Nessun gap registrato dopo il deposito del {offering_date_str} (ATM/Shelf intatto e non ancora scaricato)."
+                            edge_msg = f"SHORT EDGE CRITICO (Opportunità Massima) — Nessun gap registrato dopo il deposito del {offering_date_str} (ATM/Shelf intatto)."
                         else:
                             red_gaps = gaps_after[gaps_after['Chiusura'] == 'RED']
                             green_gaps = gaps_after[gaps_after['Chiusura'] == 'GREEN']
@@ -1432,20 +1451,20 @@ with col3:
                             red_count = len(red_gaps)
                             green_count = len(green_gaps)
                             
-                            # Se ci sono stati gap rossi (scaricamento avvenuto), l'edge short scende perché l'offering è digerita
+                            # Se ci sono stati gap RED significativi, l'offering è digerita (vantaggio short basso)
                             if red_count > 0:
                                 short_edge = "LOW"
-                                edge_msg = f"SHORT EDGE BASSO (Diluizione già digerita) — Registrate {red_count} giornate in gap con chiusura RED dopo il deposito."
+                                edge_msg = f"SHORT EDGE BASSO (Opportunità Minima) — Registrate {red_count} giornate in gap con chiusura RED dopo il deposito (Diluizione già digerita)."
                             else:
                                 short_edge = "HIGH"
-                                edge_msg = f"SHORT EDGE ALTO (Offering non ancora scaricata) — Registrate {green_count} giornate in gap con chiusura GREEN dopo il deposito."
+                                edge_msg = f"SHORT EDGE ALTO (Opportunità Forte) — Registrate {green_count} giornate in gap con chiusura GREEN dopo il deposito (Offering non ancora scaricata)."
                     except Exception as e:
                         print("Errore calcolo cronologico short edge:", e)
                         short_edge = "UNKNOWN"
                 else:
                     # Se non ci sono registrazioni di offering recenti negli ultimi 6 mesi, usiamo la Runway per definire l'opportunità
                     raw_runway = sec_data.get('runway_months', ' - ')
-                    if raw_runway == "Cash Flow +":
+                    if "Cash Flow" in raw_runway or "+" in raw_runway:
                         short_edge = "LOW"
                         edge_msg = "SHORT EDGE BASSO — Nessuna offering recente rilevata e cassa solida (flusso di cassa positivo)."
                     else:
@@ -1453,10 +1472,10 @@ with col3:
                             r_val = float(raw_runway.split()[0])
                             if r_val < 3.0:
                                 short_edge = "CRITICAL"
-                                edge_msg = f"SHORT EDGE CRITICO (Cassa in esaurimento) — Nessuna offering recente, ma autonomia inferiore a {runway_val_str}."
+                                edge_msg = f"SHORT EDGE CRITICO (Opportunità Massima) — Nessuna offering recente, ma autonomia inferiore a 3 mesi."
                             elif r_val < 12.0:
                                 short_edge = "HIGH"
-                                edge_msg = f"SHORT EDGE ALTO (Autonomia limitata) — Nessuna offering recente, ma autonomia inferiore a 12 mesi."
+                                edge_msg = f"SHORT EDGE ALTO (Opportunità Forte) — Nessuna offering recente, ma autonomia inferiore a 12 mesi."
                             else:
                                 short_edge = "LOW"
                                 edge_msg = "SHORT EDGE BASSO — Nessuna offering recente e cassa sicura (oltre 12 mesi di autonomia)."
@@ -1611,3 +1630,6 @@ st.markdown("""
         <a href="https://GapFound.github.io/GAP_Finder_dipendent_files/disclaimer.html" target="_blank">Data Disclaimer</a>
     </div>
 """, unsafe_allow_html=True)
+
+Fai subito il commit di questo blocco modificato, salva ed esegui. Risolverà sia
+lo stato di AAPL sia la scomposizione cronologica dei gap per VEEE a schermo.
