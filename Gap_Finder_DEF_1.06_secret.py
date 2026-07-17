@@ -119,7 +119,7 @@ def fetch_sec_data(cik):
             if cash_units and len(cash_units) >= 2:
                 latest_cash = float(cash_units[-1]['val'])
                 prev_cash = float(cash_units[-2]['val'])
-                cash_change = prev_cash - latest_cash # Se positivo indica decremento di cassa
+                cash_change = prev_cash - latest_cash # Se positivo indica decremento di cassa (bruciatura)
                 if cash_change > 0:
                     monthly_burn = cash_change / 3.0
         
@@ -502,8 +502,8 @@ def render_table_with_slider(
       }});
 
       scroller.addEventListener("scroll", syncSliderFromScroll);
-      rangeEl.addEventListener("input",  syncScrollFromSlider);
-      rangeEl.addEventListener("change", syncScrollFromSlider);
+      rangeEl.addEventListener("input",  syncSliderFromScroll);
+      rangeEl.addEventListener("change", syncSliderFromScroll);
 
       new ResizeObserver(syncSliderFromScroll).observe(content);
       new ResizeObserver(syncSliderFromScroll).observe(sliderBox);
@@ -1375,7 +1375,7 @@ with col2:
                                # Scritto come stringa piatta su un'unica riga per impedire la generazione di box grigi ed attivare nuove schede
                                news_html += f'<div style="text-align:left; font-size:13px; margin-bottom:6px; line-height:1.3;"><strong style="color:red;">{data_da_stampa}</strong>&nbsp;<a href="{link}" style="text-decoration:none; color:inherit;" target="_blank">{b["Title"]}</a></div>'
                            
-                           # STAMPATO UNICAMENTE UNA VOLTA FUOI DAL LOOP ATTRAVERSO ST.MARKDOWN
+                           # STAMPATO UNICAMENTE UNA VOLTA FUORI DAL LOOP ATTRAVERSO ST.MARKDOWN
                            st.markdown(news_html, unsafe_allow_html=True)
 
                    if isinstance(st.session_state['news'], str):
@@ -1396,8 +1396,14 @@ with col3:
             sec_data = cached_profile.get('sec_data')
             
         if isinstance(sec_data, dict):
-            # ANALISI CRONOLOGICA DI DIGESTIONE DELL'OFFERING RISPETTO AI GAP REALI (SHORT EDGE DI LUCA)
-            offering_date_str = sec_data.get('active_offering_date')
+            # ESTRAZIONE DINAMICA DELLA DATA DALLA STRINGA (Supporta sia vecchie che nuove cache per evitare stalli)
+            active_offering_str = sec_data.get('active_offering', ' - ')
+            offering_date_str = None
+            if "depositato il" in active_offering_str:
+                offering_date_str = active_offering_str.split("depositato il")[-1].strip()
+            elif "registrato il" in active_offering_str:
+                offering_date_str = active_offering_str.split("registrato il")[-1].strip()
+                
             short_edge = "UNKNOWN"
             edge_msg = "Analisi basata sulla runway trimestrale dei dati SEC e sul monitoraggio delle registrazioni di offering pendenti."
             
