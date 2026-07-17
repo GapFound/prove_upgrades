@@ -827,50 +827,30 @@ def datagathering_func(nome_ticker):
               
               profile_data = cache_data.get('profile', None)
               
-              # CONDIZIONE DI AGGIORNAMENTO SPECIFICHE FORZATA (v1.3 per invalidare e aggiornare le cache obsolete)
-              needs_sec_update = False
-              if profile_data is None or cache_data.get('version') != "v1.3":
-                  needs_sec_update = True
-              else:
-                  sec_data = profile_data.get('sec_data')
-                  # Se mancano i nuovi campi richiesti dalle specifiche forziamo la rigenerazione
-                  if not isinstance(sec_data, dict) or 'active_offering_form' not in sec_data:
-                      needs_sec_update = True
-                  # Se il CIK è assente o non valido nella cache esistente, forziamo l'aggiornamento
-                  elif not profile_data.get('cik') or str(profile_data.get('cik')).strip() in ['', '-', ' - ']:
-                      needs_sec_update = True
+              # Controllo profilo (anagrafica fissa immobile, i dati SEC non vengono scritti per renderli 100% real-time)
+              needs_profile_update = False
+              if profile_data is None or not isinstance(profile_data, dict):
+                  needs_profile_update = True
+              elif not profile_data.get('cik') or str(profile_data.get('cik')).strip() in ['', '-', ' - ']:
+                  needs_profile_update = True
               
-              if needs_sec_update and not dati_storici.empty:
-                  print("Cache obsoleta, incompleta o affetta da bug. Eseguo l'aggiornamento automatico con le specifiche v1.3.")
-                  
-                  # Se il profilo manca o non ha un CIK valido, lo riscarichiamo da Polygon
-                  if profile_data is None or not profile_data.get('cik') or str(profile_data.get('cik')).strip() in ['', '-', ' - ']:
-                      profile_data = fetch_polygon_profile(nome_ticker)
-                  
-                  # Scarica i dati finanziari SEC freschi con la nuova logica deduplicata e univoca per data
-                  sec_metrics = fetch_sec_data(profile_data.get('cik', ''))
-                  profile_data['sec_data'] = sec_metrics
-                  
+              if needs_profile_update and not dati_storici.empty:
+                  print("Profilo incompleto o obsoleto in cache. Aggiorno i dati anagrafici.")
+                  profile_data = fetch_polygon_profile(nome_ticker)
                   try:
                       cache_data['profile'] = profile_data
-                      cache_data['version'] = 'v1.3' # Upgrade formale a v1.3
                       with open(cache_file, 'wb') as out_fp:
                           pickle.dump(cache_data, out_fp)
                   except Exception as e:
-                      print("Errore nell'aggiornamento della cache:", e)
+                      print("Errore nell'aggiornamento della cache profilo:", e)
               
               st.session_state['cached_profile'] = profile_data
               caricato = 1
    
     if caricato == 0:
-        # Ticker totalmente nuovo: scarichiamo il profilo da MASSIVE/Polygon ed i dati SEC una sola volta e lo scriviamo in cache
+        # Ticker totalmente nuovo: scarichiamo il profilo da MASSIVE/Polygon una sola volta e lo scriviamo in cache
         print("Nuovo Ticker. Scarico il profilo da Massive/Polygon.")
         fmp_profile = fetch_polygon_profile(nome_ticker)
-        
-        # Scarica i dati finanziari SEC usando il CIK in sicurezza
-        print("Scarico i dati di cassa e diluizione reali da SEC EDGAR.")
-        sec_metrics = fetch_sec_data(fmp_profile.get('cik', ''))
-        fmp_profile['sec_data'] = sec_metrics
         
         st.session_state['cached_profile'] = fmp_profile
         
@@ -986,8 +966,7 @@ def datagathering_func(nome_ticker):
                        'dati_storici': dati_storici, 
                        'splits': splits_format, 
                        'provider': provider,
-                       'profile': fmp_profile,
-                       'version': 'v1.3'
+                       'profile': fmp_profile
                    }, fp)
                return dati_storici, splits_format, provider
     else:
@@ -1461,11 +1440,12 @@ with col3:
     # ---------------------------------------------------------------------------------
     if 'dati_storici' in st.session_state and st.session_state['dati_storici'] is not None:
         cached_profile = st.session_state.get('cached_profile', None)
-        sec_data = None
-        
-        # Recuperiamo i dati SEC normalizzati salvati all'interno della cache locale
+        cik = ""
         if isinstance(cached_profile, dict):
-            sec_data = cached_profile.get('sec_data')
+            cik = cached_profile.get('cik', '')
+            
+        # CHIAMATA 100% DINAMICA IN REAL-TIME AD OGNI RICHIESTA (NESSUNA CACHE SU SEC EDGAR)
+        sec_data = fetch_sec_data(cik)
             
         if isinstance(sec_data, dict):
             offering_date_str = sec_data.get('active_offering_date', ' - ')
@@ -1639,7 +1619,7 @@ with col3:
                     <div style="font-size: 18px; font-weight: bold; color: #111;">{sec_data.get('monthly_burn', ' - ')}</div>
                 </div>
                 <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Autonomia di cassa in mesi prima del completo esaurimento delle riserve (Sotto i 3 mesi: Rosso, Sotto i 12 mesi: Arancione, Sopra i 12: Verde).">Runway Cassa ℹ️</div>
+                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Autonomia di cassa in mesi prima del completo esaurimento delle riserves (Sotto i 3 mesi: Rosso, Sotto i 12 mesi: Arancione, Sopra i 12: Verde).">Runway Cassa ℹ️</div>
                     <div style="font-size: 18px; font-weight: bold; color: {runway_color};">{runway_val_str}</div>
                 </div>
             </div>
