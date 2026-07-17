@@ -121,30 +121,72 @@ def fetch_sec_data(cik):
             if cash_val is None:
                 risk_status = "UNKNOWN"
             
-            # Calcolo del burn rate effettivo con protezione dai dati storici mancanti (es. nuove IPO come STAK)
-            if cash_units and len(cash_units) >= 2:
-                latest_cash = float(cash_units[-1]['val'])
-                prev_cash = float(cash_units[-2]['val'])
-                cash_change = prev_cash - latest_cash # Se positivo indica decremento di cassa (bruciatura)
+            # RILEVAZIONE E FILTRAGGIO CRONOLOGICO DEGLI END-DATE DISTINTI PER EVITARE FALSI POSITIVI DA DUPLICATI
+            if cash_units:
+                # Seleziona i report ufficiali per ridurre il rumore, altrimenti usa tutti i record disponibili
+                official_units = [u for u in cash_units if u.get('form') in ['10-Q', '10-K', '20-F']]
+                target_units = official_units if official_units else cash_units
                 
-                if cash_change > 0:
-                    monthly_burn_val = cash_change / 3.0
-                    runway_val = latest_cash / monthly_burn_val
-                    runway_str = f"{runway_val:.2f} Mesi"
-                    if runway_val < 3.0:
-                        risk_status = "RED" # Sotto i 3 mesi: Pericolo Critico Rosso
-                    elif runway_val < 12.0 and risk_status != "RED":
-                        risk_status = "YELLOW" # Tra 3 e 12 mesi: Arancione
+                unique_cash = {}
+                for u in target_units:
+                    end_str = u.get('end')
+                    val = u.get('val')
+                    if end_str and val is not None:
+                        try:
+                            end_dt = datetime.strptime(end_str, "%Y-%m-%d").date()
+                            # L'iterazione sequenziale sovrascrive i duplicati conservando l'ultimo dato depositato
+                            unique_cash[end_str] = {
+                                'val': float(val),
+                                'date': end_dt
+                            }
+                        except ValueError:
+                            pass
+                
+                # Ordina cronologicamente le date distinte ottenute
+                sorted_cash_periods = sorted(unique_cash.values(), key=lambda x: x['date'])
+                
+                if len(sorted_cash_periods) >= 2:
+                    latest_period = sorted_cash_periods[-1]
+                    prev_period = sorted_cash_periods[-2]
+                    
+                    latest_cash = latest_period['val']
+                    prev_cash = prev_period['val']
+                    
+                    # Calcola i mesi reali trascorsi tra le due date di bilancio
+                    date_diff = latest_period['date'] - prev_period['date']
+                    months_diff = date_diff.days / 30.4375
+                    
+                    # Protezione contro record sovrapposti o anomali
+                    if months_diff > 0.5:
+                        cash_change = prev_cash - latest_cash # Se positivo, indica decremento (burn di cassa)
+                        
+                        if cash_change > 0:
+                            monthly_burn_val = cash_change / months_diff
+                            runway_val = latest_cash / monthly_burn_val
+                            runway_str = f"{runway_val:.2f} Mesi"
+                            if runway_val < 3.0:
+                                risk_status = "RED"
+                            elif runway_val < 12.0 and risk_status != "RED":
+                                risk_status = "YELLOW"
+                        elif cash_change < 0:
+                            # Cassa effettivamente aumentata rispetto al trimestre/anno precedente
+                            monthly_burn_val = 0.0
+                            runway_str = "Cash Flow +"
+                        else:
+                            # Cassa rimasta perfettamente identica
+                            monthly_burn_val = 0.0
+                            runway_str = " - "
+                    else:
+                        monthly_burn_val = None
+                        runway_str = " - "
                 else:
-                    # Cassa aumentata rispetto al trimestre precedente (Cash Flow +)
-                    monthly_burn_val = 0.0
-                    runway_str = "Cash Flow +"
+                    # Elementi insufficienti per calcolare la variazione cronologica (es. 1 solo bilancio)
+                    monthly_burn_val = None
+                    runway_str = " - "
             else:
-                # Dati storici insufficienti per fare la variazione -> Nessun default a Cash Flow +
+                # Nessun dato temporale di cassa registrato
                 monthly_burn_val = None
                 runway_str = " - "
-                if cash_val is None:
-                    risk_status = "UNKNOWN"
         
         # 2. Recupero moduli depositati (Submissions) per trovare Offering attive negli ultimi 6 mesi
         sub_url = f"https://data.sec.gov/submissions/CIK{cik_str}.json"
@@ -785,9 +827,9 @@ def datagathering_func(nome_ticker):
               
               profile_data = cache_data.get('profile', None)
               
-              # CONDIZIONE DI AGGIORNAMENTO SPECIFICHE (Per evitare letture pedisseque di cache obsolete)
+              # CONDIZIONE DI AGGIORNAMENTO SPECIFICHE (Per evitare letture pedisseque di cache obsolete o con logica burn rate errata)
               needs_sec_update = False
-              if profile_data is None:
+              if profile_data is None or cache_data.get('version') != "v1.1":
                   needs_sec_update = True
               else:
                   sec_data = profile_data.get('sec_data')
@@ -800,12 +842,13 @@ def datagathering_func(nome_ticker):
                   if profile_data is None:
                       profile_data = fetch_polygon_profile(nome_ticker)
                   
-                  # Scarica i dati finanziari SEC freschi con la nuova logica (che include active_offering_form)
+                  # Scarica i dati finanziari SEC freschi con la nuova logica (che include active_offering_form e deduplicazione date)
                   sec_metrics = fetch_sec_data(profile_data.get('cik', ''))
                   profile_data['sec_data'] = sec_metrics
                   
                   try:
                       cache_data['profile'] = profile_data
+                      cache_data['version'] = 'v1.1'
                       with open(cache_file, 'wb') as out_fp:
                           pickle.dump(cache_data, out_fp)
                   except Exception as e:
@@ -938,7 +981,8 @@ def datagathering_func(nome_ticker):
                        'dati_storici': dati_storici, 
                        'splits': splits_format, 
                        'provider': provider,
-                       'profile': fmp_profile 
+                       'profile': fmp_profile,
+                       'version': 'v1.1'
                    }, fp)
                return dati_storici, splits_format, provider
     else:
@@ -1306,6 +1350,9 @@ with col2:
             }
             .stTable td, .stTable th {
                 white-space: nowrap !important;  
+            }
+            .stTable {
+                max-width: 100% !important;
             }
             .stSlider {
                 margin-bottom: -20px; 
