@@ -19,6 +19,7 @@ from IPython.display import display, clear_output
 from bs4 import BeautifulSoup
 
 import yfinance as yf
+from finvizfinance.quote import finvizfinance
 import streamlit as st
 import streamlit.components.v1 as components
 import pickle
@@ -90,6 +91,29 @@ def get_ocf_burn(us_gaap, cash_val):
         return monthly_burn
     return None
 
+# NORMALIZZAZIONE DEI VALORI NUMERICI DI STOCKANALYSIS PER ALLINEARLI ALLA NOTAZIONE MILIONE DI YFINANCE
+def format_sa_numeric_value(val_str):
+    if not val_str or val_str == ' - ':
+        return ' - '
+    val_str = val_str.strip()
+    # Se il dato possiede già un suffisso noto, lo lasciamo inalterato
+    if val_str.endswith(('M', 'B', 'K', '%')):
+        return val_str
+    try:
+        # Rimuove le virgole per permettere il corretto parsing come float
+        cleaned = val_str.replace(',', '')
+        num = float(cleaned)
+        if num >= 10**9:
+            return f"{num/10**9:.2f}B"
+        elif num >= 10**6:
+            return f"{num/10**6:.2f}M"
+        elif num >= 1000:
+            # Converte e formatta i valori sotto il milione (es: 665,849 -> 0.67M)
+            return f"{num/10**6:.2f}M"
+        return f"{num:.2f}"
+    except ValueError:
+        return val_str
+
 # FUNZIONE PER ESTRARRE I DATI STATISTICI FONDAMENTALI DA STOCKANALYSIS IN SOSTITUZIONE DI FINVIZ
 def fetch_stockanalysis_stats(nome_ticker):
     default_stats = {
@@ -110,7 +134,6 @@ def fetch_stockanalysis_stats(nome_ticker):
             soup = BeautifulSoup(res.text, 'html.parser')
             
             stats = {}
-            # Raccoglie tutti gli elementi delle tabelle statistiche di StockAnalysis
             for row in soup.find_all('tr'):
                 cells = row.find_all('td')
                 if len(cells) >= 2:
@@ -126,9 +149,9 @@ def fetch_stockanalysis_stats(nome_ticker):
                 return ' - '
             
             return {
-                'M.Cap': find_val(['market cap', 'market capitalization']),
-                'Outstand.': find_val(['shares outstanding']),
-                'Float': find_val(['float']),
+                'M.Cap': format_sa_numeric_value(find_val(['market cap', 'market capitalization'])),
+                'Outstand.': format_sa_numeric_value(find_val(['shares outstanding'])),
+                'Float': format_sa_numeric_value(find_val(['float'])),
                 'Insider': find_val(['owned by insiders']),
                 'Inst.O.': find_val(['owned by institutions']),
                 'S.Float': find_val(['short % of float'])
@@ -523,11 +546,15 @@ def render_table_with_slider(
     padding_px: int = 14,
     key: str = "tbl",
     escape: bool = True,
+    reset_index: bool = True
 ):
     try:
-        df2 = df.copy()
-        df2.index = range(1, len(df2) + 1)
-        df2.index.name = ""
+        if reset_index:
+            df2 = df.copy()
+            df2.index = range(1, len(df2) + 1)
+            df2.index.name = ""
+        else:
+            df2 = df.copy()
     except Exception:
         df2 = df
 
@@ -889,7 +916,6 @@ def fondamentali_func(nome_ticker):
 #%%
 
 # CARICO LE NEWS DA FINVIZ
-
 def news_func(nome_ticker):
     tentativi = 0
     while tentativi < 5:
@@ -1433,7 +1459,8 @@ with col1:
             )
             st.markdown(ticker_info_html, unsafe_allow_html=True)
 
-            st.table(st.session_state['fondamentali'])
+            # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 1 DEI FONDAMENTALI (reset_index=False per mantenere M.Cap, Outstand, ecc.)
+            render_table_with_slider(st.session_state['fondamentali'], key="fond", reset_index=False, min_rows=6, max_rows=6)
             print(st.session_state['fondamentali'])
                    
             if not st.session_state['dati_split'].empty:
@@ -1495,8 +1522,8 @@ with col2:
            st.write(""); st.write("")
            
            if not v_gaps.empty:
-               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER CON SCROLLER ORIZZONTALE SULLE TABELLE
-               render_table_with_slider(v_gaps, key="gaps")
+               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 2 DEI GAPPERS (reset_index=True)
+               render_table_with_slider(v_gaps, key="gaps", reset_index=True)
                
                # CALCOLO E VISUALIZZAZIONE DELLE STATISTICHE DI CHIUSURA RED/GREEN DEI GAPPER FILTRATI (CON CONTEGGIO MINIMALISTA IN REGULAR)
                total_gaps = len(v_gaps)
