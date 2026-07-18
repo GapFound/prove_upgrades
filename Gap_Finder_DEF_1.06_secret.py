@@ -582,7 +582,7 @@ def render_table_with_slider(
     html = f"""
     <div id="gf-wrap-{key}" style="
       position:relative; z-index:2147483000;
-      width:{width_pct}%; max-width:{width_pct}%; margin-right: auto; margin-left: 0;
+      width:{width_pct}%; max-width:{width_pct}%; margin: 0 auto;
       box-sizing:border-box; overflow:visible;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
 
@@ -730,6 +730,12 @@ def render_table_with_slider(
       setTimeout(syncSliderFromScroll, 120);
     </script>
     """
+    
+    # SOSTITUZIONE CHIRURGICA DELLA TESTA DEL RELLANGOLO IN ALTO A SINISTRA CON IL PUNTO INTERROGATIVO CERCHIATO E NERO (ESCAPE=FALSE SUL CALLER)
+    if key == "fond":
+        corner_html = '<th style="cursor:help; text-align:center; vertical-align:middle;" title="Sa = StockAnalysis&#10;Yf = YahooFinance"><span style="display:inline-block; width:13px; height:13px; line-height:12px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:9.5px; font-weight:bold; color:#000000; font-family:system-ui;">?</span></th>'
+        html = html.replace('<th></th>', corner_html, 1)
+
     components.html(html, height=component_h, scrolling=False)
 
 #%%
@@ -1475,7 +1481,6 @@ with col1:
 
             # COPIA DEL DATAFRAME PER INIETTARE L'HTML DEL PUNTO INTERROGATIVO CON TOOLTIP NELLA CELLA IN ALTO A SINISTRA (escape=False)
             fond_df_copy = st.session_state['fondamentali'].copy()
-            fond_df_copy.index.name = '<span title="Sa = StockAnalysis&#10;Yf = YahooFinance" style="cursor:help; font-size:12px;">❔</span>'
 
             # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 1 DEI FONDAMENTALI (reset_index=False per mantenere M.Cap, Outstand, ecc. e font_px=10.0 per massima leggibilita' ed ingombro al 100% della colonna stretta 0.11)
             render_table_with_slider(fond_df_copy, key="fond", reset_index=False, font_px=10.0, min_rows=6, max_rows=6, width_pct=100, escape=False)
@@ -1540,7 +1545,7 @@ with col2:
            st.write(""); st.write("")
            
            if not v_gaps.empty:
-               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 2 DEI GAPPERS (reset_index=True, ingombro riallineato stabilmente al 95% per simmetria perfetta)
+               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 2 DEI GAPPERS (reset_index=True, ingombro al 95% e margin: 0 auto per asse centrale perfetto)
                render_table_with_slider(v_gaps, key="gaps", reset_index=True, font_px=11.5, width_pct=95)
                
                # CALCOLO E VISUALIZZAZIONE DELLE STATISTICHE DI CHIUSURA RED/GREEN DEI GAPPER FILTRATI (CON CONTEGGIO MINIMALISTA IN REGULAR)
@@ -1759,30 +1764,30 @@ with col3:
             metrics_top_html = f"""
             <div style="display: flex; gap: 10px; margin-bottom: 15px; font-family: system-ui,-apple-system; box-sizing: border-box;">
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Ultima cassa liquida disponibile dichiarata nel report SEC.">Cash on Hand ❔</div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">Cash on Hand <span style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; cursor:help; vertical-align:middle; margin-left:4px;" title="Ultima cassa liquida disponibile dichiarata nel report SEC.">?</span></div>
                     <div style="font-size: 18px; font-weight: bold; color: var(--text-news);">{cash_on_hand_val}</div>
                 </div>
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Velocità media di bruciatura mensile delle riserve liquide tra gli ultimi due trimestri.">Monthly Burn ❔</div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">Monthly Burn <span style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; cursor:help; vertical-align:middle; margin-left:4px;" title="Velocità media di bruciatura mensile delle riserve liquide tra gli ultimi due trimestri.">?</span></div>
                     <div style="font-size: 18px; font-weight: bold; color: var(--text-news);">{monthly_burn_val_str}</div>
                 </div>
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Autonomia di cassa in mesi prima del completo esaurimento delle riserve (Sotto i 3 mesi: Rosso, Sotto i 12 mesi: Arancione, Sopra i 12: Verde).">Runway Cassa ❔</div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">Runway Cassa <span style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; cursor:help; vertical-align:middle; margin-left:4px;" title="Autonomia di cassa in mesi prima del completo esaurimento delle riserve (Sotto i 3 mesi: Rosso, Sotto i 12 mesi: Arancione, Sopra i 12: Verde).">?</span></div>
                     <div style="font-size: 18px; font-weight: bold; color: {runway_color};">{runway_val_str}</div>
                 </div>
             </div>
             """
             st.markdown(metrics_top_html, unsafe_allow_html=True)
             
-            # Griglia di metriche inferiores di solvibilità (Ratio e Liquidity Test)
+            # Griglia di metriche inferiori di solvibilità (Ratio e Liquidity Test)
             metrics_bottom_html = f"""
             <div style="display: flex; gap: 10px; margin-bottom: 20px; font-family: system-ui,-apple-system; box-sizing: border-box;">
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Indica quanta parte delle attività correnti dichiarate è composta da cassa liquida reale. Sotto il 20%: Rosso (attività illiquide).">Cash / Current Assets % ❔</div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">Cash / Current Assets % <span style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; cursor:help; vertical-align:middle; margin-left:4px;" title="Indica quanta parte delle attività correnti dichiarate è composta da cassa liquida reale. Sotto il 20%: Rosso (attività illiquide).">?</span></div>
                     <div style="font-size: 18px; font-weight: bold; color: {ratio_color};">{curr_assets_ratio_val}</div>
                 </div>
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Cassa liquida divisa per le passività correnti (debiti entro l'anno). Sotto 1.2 indica alto rischio di insolvenza immediata e diluizione forzata (Rosso).">Liquidity Test Ratio ❔</div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">Liquidity Test Ratio <span style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; cursor:help; vertical-align:middle; margin-left:4px;" title="Cassa liquida divisa per le passività correnti (debiti entro l'anno). Sotto 1.2 indica alto rischio di insolvenza immediata e diluizione forzata (Rosso).">?</span></div>
                     <div style="font-size: 18px; font-weight: bold; color: {liq_color};">{liquidity_test_val}</div>
                 </div>
             </div>
