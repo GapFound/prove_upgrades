@@ -354,6 +354,7 @@ def fetch_sec_data(cik):
             
             offering_forms = ["S-1", "S-3", "424B3", "424B4", "424B5", "424B7", "S-1/A", "S-3/A"]
             magic_words = ["common stock", "common shares", "ordinary shares", "at-the-market", "at the market"]
+            debt_words = ["senior notes", "notes due", "debt securities", "senior debt", "underwritten notes"]
             found_offering = False
             links_count = 0
             seen_filings = set() # SET DI DEDUPLICAZIONE PER I DEPOSITI CONSULTABILI
@@ -383,18 +384,25 @@ def fetch_sec_data(cik):
                     try:
                         filing_dt = datetime.strptime(filing_date, "%Y-%m-%d").date()
                         if (datetime.now().date() - filing_dt).days <= 180:
-                            # SCRAPER INTERNO CHIRURGICO: Scarichiamo solo la copertina (primi 100KB) tramite HTTP Range Request
+                            # SCRAPER INTERNO CHIRURGICO: Scarichiamo solo la copertina (primi 40KB) tramite HTTP Range Request per massima efficienza
                             range_headers = {
                                 'User-Agent': 'Luca Loiacono lucaloia@gmail.com',
-                                'Range': 'bytes=0-100000'
+                                'Range': 'bytes=0-40000'
                             }
                             doc_res = requests.get(sec_link, headers=range_headers, timeout=5)
                             is_equity = False
                             
                             if doc_res.status_code in [200, 206]:
                                 doc_text = doc_res.text.lower()
-                                # Se contiene i sinonimi legali di diluizione azionaria, l'allerta viene convalidata
-                                is_equity = any(word in doc_text for word in magic_words)
+                                # Verifichiamo la presenza dei termini azionari e di debito
+                                has_equity = any(word in doc_text for word in magic_words)
+                                has_debt = any(word in doc_text for word in debt_words)
+                                
+                                # LOGICA DI LUCA: Se trovi entrambi, scarti (obbligazioni/debito). Se trovi solo equity, tieni (diluizione reale)
+                                if has_equity and not has_debt:
+                                    is_equity = True
+                                else:
+                                    is_equity = False
                             else:
                                 # Fallback prudenziale di sicurezza in caso di errore della richiesta parziale
                                 is_equity = True
@@ -522,7 +530,7 @@ def fetch_polygon_profile(nome_ticker):
                 "JO": "Jordan", "JP": "Japan", "KE": "Kenya", "KG": "Kyrgyzstan", "KH": "Cambodia",
                 "KI": "Kiribati", "KM": "Comoros", "KN": "Saint Kitts and Nevis", "KP": "North Korea",
                 "KR": "South Korea", "KW": "Kuwait", "KY": "Cayman Islands", "KZ": "Kazakhstan",
-                "LA": "Laos", "LB": "Lebanon", "LC": "Saint Lucia", "LI": "Liechtenstein", "LK": "Sri Lanka",
+                "LA": "Laos", "LB": "Lebanon", "LC": "Saint Lucia", "LI": "Lichtenstein", "LK": "Sri Lanka",
                 "LR": "Liberia", "LS": "Lesotho", "LT": "Lithuania", "LU": "Luxembourg", "LV": "Latvia",
                 "LY": "Libya", "MA": "Morocco", "MC": "Monaco", "MD": "Moldova", "ME": "Montenegro",
                 "MF": "Saint Martin", "MG": "Madagascar", "MH": "Marshall Islands", "MK": "North Macedonia",
@@ -538,7 +546,7 @@ def fetch_polygon_profile(nome_ticker):
                 "RS": "Serbia", "RU": "Russia", "RW": "Rwanda", "SA": "Saudi Arabia", "SB": "Solomon Islands",
                 "SC": "Seychelles", "SD": "Sudan", "SE": "Sweden", "SG": "Singapore", "SH": "Saint Helena",
                 "SI": "Slovenia", "SJ": "Svalbard and Jan Mayen", "SK": "Slovakia", "SL": "Sierra Leone",
-                "SM": "San Marino", "SN": "Senegal", "SO": "Somalia", "SR": "Suriname", "SS": "South Sudan",
+                "SM": "San Marino", "SN": "Senegal", "SO": "Supporters", "SR": "Suriname", "SS": "South Sudan",
                 "ST": "São Tomé and Príncipe", "SV": "El Salvador", "SX": "Sint Maarten", "SY": "Syria",
                 "SZ": "Eswatini", "TC": "Turks and Caicos Islands", "TD": "Chad", "TF": "French Southern Territories",
                 "TG": "Togo", "TH": "Thailand", "TJ": "Tajikistan", "TK": "Tokelau", "TL": "Timor-Leste",
@@ -1763,7 +1771,7 @@ with col3:
             form_type = sec_data.get('active_offering_form', ' - ')
                 
             short_edge = "UNKNOWN"
-            edge_msg = "Analisi basata sulla runway trimestrale dei dati SEC e sul monitoraggio delle registrazioni di offering pendenti."
+            edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi."
             
             # Se mancano del tutto i dati SEC, rimane grigio spento
             if sec_data.get('cash_on_hand') == ' - ':
