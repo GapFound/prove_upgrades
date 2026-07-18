@@ -1295,8 +1295,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# PROPORZIONI AGGIORNATE: RESTRINTA ULTERIORMENTE LA COLONNA 3 AL 32% PER MASSIMIZZARE IL DISTANZIAMENTO, ESPANSA COLONNA 1 DEI FONDAMENTALI AL 16% PER LEGGIBILITA'
-col1, col2, col3 = st.columns([0.16, 0.52, 0.32])   
+# RIPRISTINATE LE PROPORZIONI ORIGINARIE: COLONNA 1 RIPORTATA ALL'11%, COLONNA 2 AL 49% E COLONNA 3 AL 40% PER MASSIMA OMOGENEITA' VISIVA
+col1, col2, col3 = st.columns([0.11, 0.49, 0.40])   
     
 # INSERISCO il TICKER
 global nome_ticker
@@ -1461,8 +1461,8 @@ with col1:
             )
             st.markdown(ticker_info_html, unsafe_allow_html=True)
 
-            # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 1 DEI FONDAMENTALI (reset_index=False per mantenere M.Cap, Outstand, ecc. e font_px=10.0 per massima leggibilita' ed ingombro 95%)
-            render_table_with_slider(st.session_state['fondamentali'], key="fond", reset_index=False, font_px=10.0, min_rows=6, max_rows=6, width_pct=95)
+            # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 1 DEI FONDAMENTALI (reset_index=False per mantenere M.Cap, Outstand, ecc. e font_px=10.0 per massima leggibilita' ed ingombro al 100% della colonna stretta 0.11)
+            render_table_with_slider(st.session_state['fondamentali'], key="fond", reset_index=False, font_px=10.0, min_rows=6, max_rows=6, width_pct=100)
             print(st.session_state['fondamentali'])
                    
             if not st.session_state['dati_split'].empty:
@@ -1524,8 +1524,8 @@ with col2:
            st.write(""); st.write("")
            
            if not v_gaps.empty:
-               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 2 DEI GAPPERS (reset_index=True, ingombro 90% per staccare colonna 3, font_px=11.5)
-               render_table_with_slider(v_gaps, key="gaps", reset_index=True, font_px=11.5, width_pct=90)
+               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 2 DEI GAPPERS (reset_index=True, ingombro ridotto all'85% per garantire una netta separazione visiva da colonna 3)
+               render_table_with_slider(v_gaps, key="gaps", reset_index=True, font_px=11.5, width_pct=85)
                
                # CALCOLO E VISUALIZZAZIONE DELLE STATISTICHE DI CHIUSURA RED/GREEN DEI GAPPER FILTRATI (CON CONTEGGIO MINIMALISTA IN REGULAR)
                total_gaps = len(v_gaps)
