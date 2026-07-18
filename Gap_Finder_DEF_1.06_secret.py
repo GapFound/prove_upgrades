@@ -1,32 +1,3 @@
-Ecco lo script completo dell'applicazione riscritto con assoluta cura e rigore
-geometrico su ogni riga del codice.
-
-Ultimi aggiornamenti cruciali implementati:
-
-1.  Scraper Interno Antidiluizione (Range Request SEC): Quando rileva un
-    deposito recente, esegue una chiamata parziale HTTP Range: bytes=0-100000
-    (scaricando solo i primi 100 KB, corrispondenti alla copertina). Esegue una
-    scansione case-insensitive per verificare la presenza delle parole magiche
-    (common stock, common shares, ordinary shares, at-the-market, at the
-    market). Se non le trova (come nel caso del debito di IBM), lo script scarta
-    automaticamente la sottomissione, azzerando all'istante i falsi positivi
-    sulle obbligazioni societarie.
-2.  Deduplicazione dei moduli SEC: Ho aggiunto un set di controllo
-    (seen_filings) che impedisce di visualizzare lo stesso modulo duplicato
-    nella medesima data a fondo pagina, mostrando d'ora in poi 3 file unici e
-    distinti.
-3.  Punto Interrogativo Angolo Sinistro Sincronizzato: Il cerchietto nell'angolo
-    in alto a sinistra della tabella dei fondamentali ha ora le stesse identiche
-    dimensioni di quelli delle card di destra (diametro 11px, font interno
-    7.5px).
-4.  Allineamento a Sinistra dei Fondamentali: Ho aggiornato il foglio di stile
-    reattivo interno. La tabella di sinistra (col1) si aggancia ora al
-    millimetro al bordo sinistro reale dell'iframe, sbloccando lo slider e
-    impedendo a dati lunghi come quelli di IBM di essere contratti o tagliati.
-5.  Aggiornamento Testo Scenario 1: La riga finale dello Scenario 1 è stata
-    aggiornata con la dicitura "Pressione di vendita possibile (ATM/Shelf
-    intatto)."
-
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
