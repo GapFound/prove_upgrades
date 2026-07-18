@@ -677,6 +677,46 @@ def render_table_with_slider(
           color: #cccccc;
         }}
       }}
+
+      /* AGGIUNTA DEL COSTRUTTO DEL TOOLTIP DENTRO L'IFRAME PER IL PUNTO INTERROGATIVO DEI FONDAMENTALI */
+      .gf-tooltip {
+        position: relative;
+        display: inline-block;
+        cursor: help;
+      }
+      .gf-tooltip .gf-tooltiptext {
+        visibility: hidden;
+        width: 140px;
+        background-color: #212121;
+        color: #ffffff;
+        text-align: center;
+        border-radius: 4px;
+        padding: 6px;
+        position: absolute;
+        z-index: 2147483647;
+        bottom: 130%;
+        left: 50%;
+        transform: translateX(-50%);
+        opacity: 0;
+        font-size: 11px;
+        font-weight: normal;
+        font-family: system-ui, -apple-system, sans-serif;
+        line-height: 1.3;
+        pointer-events: none;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        border: 1px solid #444;
+        transition: opacity 0.1s;
+      }
+      .gf-tooltip .gf-tooltiptext.gf-tooltip-down {
+        bottom: auto;
+        top: 130%;
+        left: 0;
+        transform: none;
+      }
+      .gf-tooltip:hover .gf-tooltiptext {
+        visibility: visible;
+        opacity: 1;
+      }
     </style>
 
     <script>
@@ -737,7 +777,7 @@ def render_table_with_slider(
     </script>
     """
     
-    # SOSTITUZIONE CHIRURGICA DELLA TESTA DEL RETTANGOLO IN ALTO A SINISTRA CON IL PUNTO INTERROGATIVO CERCHIATO E NERO (ESCAPE=FALSE SUL CALLER)
+    # SOSTITUZIONE CHIRURGICA DELLA TESTA DEL RETTANGOLO IN ALTO A SINISTRA CON IL PUNTO INTERROGATIVO PICCOLO NERO CERCHIATO COERENTE A QUELLI DI DESTRA
     if key == "fond":
         corner_html = '<th style="cursor:help; text-align:center; vertical-align:middle;"><span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui;">?<span class="gf-tooltiptext gf-tooltip-down">Sa = StockAnalysis<br>Yf = YahooFinance</span></span></th>'
         html = html.replace('<th></th>', corner_html, 1)
@@ -1516,13 +1556,13 @@ with col1:
             else:
                 ticker_html = f"{nome_ticker.upper()}"
 
-            # ST.MARKDOWN BLINDATO: Stringhe piatte concatenate (senza andare a capo) per impedire a Streamlit di creare box grigi e consentire nuove schede
+            # ST.MARKDOWN BLINDATO: Stringhe piatte concatenate (senza andare a capo) per impedire a Streamlit di creare box grigi e consentire nuove schede (ridotto il carattere a 12px per settore e industria)
             ticker_info_html = (
                 f'<div style="font-size: 22px; font-weight: bold; margin-bottom: 0px; line-height: 1.1;">{ticker_html}</div>'
                 f'<div style="font-size: 13.5px; font-weight: bold; color: #d00; margin-bottom: 8px;">{st.session_state.get("nationality_exchange", {}).get("nation_full", " - ")}</div>'
                 f'<div style="font-size: 12px; margin-bottom: 5px;"><b>{st.session_state.get("nationality_exchange", {}).get("nation", " - ")} - {st.session_state.get("nationality_exchange", {}).get("exchange", " - ")}</b></div>'
-                f'<div style="font-size: 13px; font-weight: normal; color: #444;">{st.session_state.get("sector_industry", {}).get("sector", " - ")}</div>'
-                f'<div style="font-size: 13px; font-weight: normal; color: #444;">{st.session_state.get("sector_industry", {}).get("industry", " - ")}</div>'
+                f'<div style="font-size: 12px; font-weight: normal; color: #444;">{st.session_state.get("sector_industry", {}).get("sector", " - ")}</div>'
+                f'<div style="font-size: 12px; font-weight: normal; color: #444;">{st.session_state.get("sector_industry", {}).get("industry", " - ")}</div>'
             )
             st.markdown(ticker_info_html, unsafe_allow_html=True)
 
