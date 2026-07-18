@@ -579,10 +579,13 @@ def render_table_with_slider(
     scroller_h = header_px + row_px * target_rows + padding_px
     component_h = scroller_h + 36
 
+    # ALLINEAMENTO DIFFERENZIATO: Centrato per i gappers (col2), allineato rigorosamente a sinistra per i fondamentali (col1)
+    margin_style = "margin: 0 auto;" if key == "gaps" else "margin-left: 0; margin-right: auto;"
+
     html = f"""
     <div id="gf-wrap-{key}" style="
       position:relative; z-index:2147483000;
-      width:{width_pct}%; max-width:{width_pct}%; margin: 0 auto;
+      width:{width_pct}%; max-width:{width_pct}%; {margin_style}
       box-sizing:border-box; overflow:visible;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
 
@@ -1755,7 +1758,7 @@ with col3:
                             
                             if gaps_after_30.empty:
                                 # Scenario 1: Nessun gap post-deposito
-                                edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% con Volume registrata successivamente al deposito.<br>Pressione di vendita imminente (ATM/Shelf intatto)."
+                                edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% con Volume registrata successivamente al deposito.<br>Pressione di vendita possibile (ATM/Shelf intatto)."
                             else:
                                 red_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'RED']
                                 green_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'GREEN']
@@ -1771,7 +1774,7 @@ with col3:
                                     edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Registrate {n_green} giornate in gap ≥ 30% con Volume e chiusura GREEN successivamente al deposito.<br>Offering ancora pendente (cassa non ancora interamente scaricata)."
                         else:
                             # Se non ci sono gap rilevati in colonna 2, ricadiamo nello Scenario 1 (ATM intatto)
-                            edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% con Volume registrata successivamente al deposito.<br>Pressione di vendita imminente (ATM/Shelf intatto)."
+                            edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% con Volume registrata successivamente al deposito.<br>Pressione di vendita possibile (ATM/Shelf intatto)."
                     except Exception as e:
                         edge_msg = f"Form {form_type} depositato il {offering_date_str}."
                 else:
