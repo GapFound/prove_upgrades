@@ -625,6 +625,7 @@ def render_table_with_slider(
         position: sticky; top: 0;
         background:#fafafa; z-index:1;
         color: #111;
+        text-align: center !important; /* FORZATA LA CENTRATURA DI TUTTE LE INTESTAZIONI COLONNA */
       }}
       #gf-wrap-{key} thead th:first-child,
       #gf-wrap-{key} tbody td:first-child {{
@@ -639,6 +640,11 @@ def render_table_with_slider(
         scrollbar-width: none;           
       }}
       #gf-scroller-{key}::-webkit-scrollbar:horizontal {{ height:0px; display:none; }}  
+
+      /* OVERRIDE DI SICUREZZA PER NON TAGLIARE IL TOOLTIP DEI FONDAMENTALI */
+      #gf-scroller-fond {{
+        overflow: visible !important;
+      }}
 
       .gf-slider {{ position:relative; height:34px; margin-top:2px; z-index:2147483200; overflow:visible; }}
       .gf-track  {{ position:absolute; left:10px; right:10px; top:40%; height:3px; background:#e5e7eb; transform:translateY(-50%); border-radius:2px; z-index:1; }}
@@ -731,9 +737,9 @@ def render_table_with_slider(
     </script>
     """
     
-    # SOSTITUZIONE CHIRURGICA DELLA TESTA DEL RELLANGOLO IN ALTO A SINISTRA CON IL PUNTO INTERROGATIVO CERCHIATO E NERO (ESCAPE=FALSE SUL CALLER)
+    # SOSTITUZIONE CHIRURGICA DELLA TESTA DEL RETTANGOLO IN ALTO A SINISTRA CON IL PUNTO INTERROGATIVO CERCHIATO E NERO (ESCAPE=FALSE SUL CALLER)
     if key == "fond":
-        corner_html = '<th style="cursor:help; text-align:center; vertical-align:middle;" title="Sa = StockAnalysis&#10;Yf = YahooFinance"><span style="display:inline-block; width:13px; height:13px; line-height:12px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:9.5px; font-weight:bold; color:#000000; font-family:system-ui;">?</span></th>'
+        corner_html = '<th style="cursor:help; text-align:center; vertical-align:middle;"><span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui;">?<span class="gf-tooltiptext gf-tooltip-down">Sa = StockAnalysis<br>Yf = YahooFinance</span></span></th>'
         html = html.replace('<th></th>', corner_html, 1)
 
     components.html(html, height=component_h, scrolling=False)
@@ -1287,7 +1293,7 @@ st.set_page_config(
     layout="wide",  
 ) 
 
-# MOTORE REATTIVO CSS (Imposta le variabili in base al tema scuro o chiaro rilevato)
+# MOTORE REATTIVO CSS (Imposta le variabili in base al tema scuro o chiaro rilevato, con Tooltip istantaneo)
 st.markdown("""
     <style>
       :root {
@@ -1309,6 +1315,47 @@ st.markdown("""
           --date-color: #aaaaaa;
           --sec-link-color: #ff4b4b;
         }
+      }
+
+      /* STILE DEL TOOLTIP ISTANTANEO IN PURO CSS */
+      .gf-tooltip {
+        position: relative;
+        display: inline-block;
+        cursor: help;
+      }
+      .gf-tooltip .gf-tooltiptext {
+        visibility: hidden;
+        width: 160px;
+        background-color: #212121;
+        color: #ffffff;
+        text-align: center;
+        border-radius: 4px;
+        padding: 6px;
+        position: absolute;
+        z-index: 2147483647;
+        bottom: 130%; /* mostrato sopra di default */
+        left: 50%;
+        transform: translateX(-50%);
+        opacity: 0;
+        font-size: 11px;
+        font-weight: normal;
+        font-family: system-ui, -apple-system, sans-serif;
+        line-height: 1.3;
+        pointer-events: none;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        border: 1px solid #444;
+        transition: opacity 0.1s;
+      }
+      /* Posizionamento specifico verso il basso per l'angolo a sinistra */
+      .gf-tooltip .gf-tooltiptext.gf-tooltip-down {
+        bottom: auto;
+        top: 130%;
+        left: 0;
+        transform: none;
+      }
+      .gf-tooltip:hover .gf-tooltiptext {
+        visibility: visible;
+        opacity: 1;
       }
     </style>
 """, unsafe_allow_html=True)
@@ -1545,7 +1592,7 @@ with col2:
            st.write(""); st.write("")
            
            if not v_gaps.empty:
-               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 2 DEI GAPPERS (reset_index=True, ingombro al 95% e margin: 0 auto per asse centrale perfetto)
+               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 2 DEI GAPPERS (reset_index=True, ingombro riallineato stabilmente al 95% per simmetria perfetta)
                render_table_with_slider(v_gaps, key="gaps", reset_index=True, font_px=11.5, width_pct=95)
                
                # CALCOLO E VISUALIZZAZIONE DELLE STATISTICHE DI CHIUSURA RED/GREEN DEI GAPPER FILTRATI (CON CONTEGGIO MINIMALISTA IN REGULAR)
@@ -1668,7 +1715,7 @@ with col3:
                             
                             if gaps_after_30.empty:
                                 # Scenario 1: Nessun gap post-deposito
-                                edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% registrata successiva al deposito.<br>Pressione di vendita imminente (ATM/Shelf intatto)."
+                                edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% con Volume registrata successivamente al deposito.<br>Pressione di vendita imminente (ATM/Shelf intatto)."
                             else:
                                 red_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'RED']
                                 green_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'GREEN']
@@ -1678,13 +1725,13 @@ with col3:
                                 
                                 if n_red > 0:
                                     # Scenario 3: Almeno una chiusura RED post-deposito
-                                    edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Registrate {n_red} giornate in gap ≥ 30% con chiusura RED successive al deposito.<br>Diluizione completata (ATM/Shelf parzialmente o interamente scaricato)."
+                                    edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Registrate {n_red} giornate in gap ≥ 30% con Volume e chiusura RED successivamente al deposito.<br>Diluizione completata (ATM/Shelf parzialmente o interamente scaricato)."
                                 else:
                                     # Scenario 2: Gap successivi ma tutti GREEN post-deposito
-                                    edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Registrate {n_green} giornate in gap ≥ 30% con chiusura GREEN successive al deposito.<br>Offering ancora pendente (cassa non ancora interamente scaricata)."
+                                    edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Registrate {n_green} giornate in gap ≥ 30% con Volume e chiusura GREEN successivamente al deposito.<br>Offering ancora pendente (cassa non ancora interamente scaricata)."
                         else:
                             # Se non ci sono gap rilevati in colonna 2, ricadiamo nello Scenario 1 (ATM intatto)
-                            edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% registrata successiva al deposito.<br>Pressione di vendita imminente (ATM/Shelf intatto)."
+                            edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% con Volume registrata successivamente al deposito.<br>Pressione di vendita imminente (ATM/Shelf intatto)."
                     except Exception as e:
                         edge_msg = f"Form {form_type} depositato il {offering_date_str}."
                 else:
@@ -1757,6 +1804,13 @@ with col3:
             curr_assets_ratio_val = sec_data.get('current_assets_ratio', ' - ')
             liquidity_test_val = sec_data.get('liquidity_test', ' - ')
 
+            # DEFINIZIONE DELLE SCRIBILI DEI TOOLTIP IN COCKPIT CON PUNTO INTERROGATIVO PICCOLO NERO CERCHIATO (CORPO 7.5PX) SENZA LATENZA DI ATTESA
+            coh_tooltip = 'Cash on Hand <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Ultima cassa liquida disponibile dichiarata nel report SEC.</span></span>'
+            mb_tooltip = 'Monthly Burn <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Velocità media di bruciatura mensile delle riserve liquide tra gli ultimi due trimestri.</span></span>'
+            rc_tooltip = 'Runway Cassa <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Autonomia di cassa in mesi prima del completo esaurimento delle riserve.</span></span>'
+            car_tooltip = 'Cash / Current Assets % <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Indica quanta parte delle attività correnti dichiarate è composta da cassa liquida reale.</span></span>'
+            ltr_tooltip = 'Liquidity Test Ratio <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Cassa liquida divisa per le passività correnti (debiti entro l\'anno). Sotto 1.2 indica alto rischio di insolvenza immediata e diluizione forzata.</span></span>'
+
             # 1. AUTONOMIA DI CASSA (CASH RUNWAY) IN CIMA AL COCKPIT (Sfondi dinamici neri `#000000` in Dark Mode tramite variabili CSS)
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-bottom: 10px;'>📊 AUTONOMIA DI CASSA (CASH RUNWAY)</div>", unsafe_allow_html=True)
             
@@ -1764,15 +1818,15 @@ with col3:
             metrics_top_html = f"""
             <div style="display: flex; gap: 10px; margin-bottom: 15px; font-family: system-ui,-apple-system; box-sizing: border-box;">
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">Cash on Hand <span style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; cursor:help; vertical-align:middle; margin-left:4px;" title="Ultima cassa liquida disponibile dichiarata nel report SEC.">?</span></div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">{coh_tooltip}</div>
                     <div style="font-size: 18px; font-weight: bold; color: var(--text-news);">{cash_on_hand_val}</div>
                 </div>
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">Monthly Burn <span style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; cursor:help; vertical-align:middle; margin-left:4px;" title="Velocità media di bruciatura mensile delle riserve liquide tra gli ultimi due trimestri.">?</span></div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">{mb_tooltip}</div>
                     <div style="font-size: 18px; font-weight: bold; color: var(--text-news);">{monthly_burn_val_str}</div>
                 </div>
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">Runway Cassa <span style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; cursor:help; vertical-align:middle; margin-left:4px;" title="Autonomia di cassa in mesi prima del completo esaurimento delle riserve (Sotto i 3 mesi: Rosso, Sotto i 12 mesi: Arancione, Sopra i 12: Verde).">?</span></div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">{rc_tooltip}</div>
                     <div style="font-size: 18px; font-weight: bold; color: {runway_color};">{runway_val_str}</div>
                 </div>
             </div>
@@ -1783,11 +1837,11 @@ with col3:
             metrics_bottom_html = f"""
             <div style="display: flex; gap: 10px; margin-bottom: 20px; font-family: system-ui,-apple-system; box-sizing: border-box;">
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">Cash / Current Assets % <span style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; cursor:help; vertical-align:middle; margin-left:4px;" title="Indica quanta parte delle attività correnti dichiarate è composta da cassa liquida reale. Sotto il 20%: Rosso (attività illiquide).">?</span></div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">{car_tooltip}</div>
                     <div style="font-size: 18px; font-weight: bold; color: {ratio_color};">{curr_assets_ratio_val}</div>
                 </div>
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">Liquidity Test Ratio <span style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; cursor:help; vertical-align:middle; margin-left:4px;" title="Cassa liquida divisa per le passività correnti (debiti entro l'anno). Sotto 1.2 indica alto rischio di insolvenza immediata e diluizione forzata (Rosso).">?</span></div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">{ltr_tooltip}</div>
                     <div style="font-size: 18px; font-weight: bold; color: {liq_color};">{liquidity_test_val}</div>
                 </div>
             </div>
@@ -1803,8 +1857,8 @@ with col3:
             """
             st.markdown(risk_badge_html, unsafe_allow_html=True)
             
-            # 3. Tabella degli ultimi link ai depositi SEC (I link sono applicati direttamente sul nome del modulo con colore var(--sec-link-color))
-            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 25px; margin-bottom: 8px;'>📂 ULTIMI DEPOSITI SEC EDGAR RILEVANTI</div>", unsafe_allow_html=True)
+            # 3. Tabella degli ultimi link ai depositi SEC (I link sono applicati direttamente sul nome del modulo con colore var(--sec-link-color). Rimossa dicitura EDGAR)
+            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 25px; margin-bottom: 8px;'>📂 ULTIMI DEPOSITI SEC RILEVANTI</div>", unsafe_allow_html=True)
             sec_links = sec_data.get('sec_links', [])
             if sec_links:
                 sec_html = ""
