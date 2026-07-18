@@ -504,9 +504,7 @@ def fetch_polygon_profile(nome_ticker):
                 "LR": "Liberia", "LS": "Lesotho", "LT": "Lithuania", "LU": "Luxembourg", "LV": "Latvia",
                 "LY": "Libya", "MA": "Morocco", "MC": "Monaco", "MD": "Moldova", "ME": "Montenegro",
                 "MF": "Saint Martin", "MG": "Madagascar", "MH": "Marshall Islands", "MK": "North Macedonia",
-                "ML": "Mali", "MM": "Myanmar", "MN": "Mongolia", "MO": "Macao", "MP": "Northern Mariana Islands",
-                "MQ": "Martinique", "MR": "Mauritania", "MS": "Montserrat", "MT": "Malta", "MU": "Mauritius",
-                "MV": "Maldives", "MW": "Malawi", "MX": "Mexico", "MY": "Malaysia", "MZ": "Possession", "NA": "Namibia",
+                "ML": "Mali", "MM": "Myanmar", "MN": "Mongolia", "MO": "Macao", "MP": "Narrow", "NA": "Namibia",
                 "NC": "New Caledonia", "NE": "Niger", "NF": "Norfolk Island", "NG": "Nigeria",
                 "NI": "Nicaragua", "NL": "Netherlands", "NO": "Norway", "NP": "Nepal", "NR": "Nauru",
                 "NU": "Niue", "NZ": "New Zealand", "OM": "Oman", "PA": "Panama", "PE": "Peru", "PF": "French Polynesia",
@@ -581,6 +579,9 @@ def render_table_with_slider(
 
     # ALLINEAMENTO DIFFERENZIATO: Centrato per i gappers (col2), allineato rigorosamente a sinistra per i fondamentali (col1)
     margin_style = "margin: 0 auto;" if key == "gaps" else "margin-left: 0; margin-right: auto;"
+    
+    # RIMOZIONE DI SICUREZZA DI MAX-WIDTH PER I FONDAMENTALI PER EVITARE CHE LE CELLE SI COMPRIMANO (SQUEEZINO) CON DATI CORPOSI
+    max_width_style = "max-width: calc(100% - 4px);" if key == "gaps" else "max-width: none !important;"
 
     html = f"""
     <div id="gf-wrap-{key}" style="
@@ -608,11 +609,17 @@ def render_table_with_slider(
     </div>
 
     <style>
+      /* ANNULLAMENTO MARGINI DI DEFAULT DEL BROWSER NELL'IFRAME PER ALLINEAMENTO MILLIMETRICO */
+      body {{
+        margin: 0 !important;
+        padding: 0 !important;
+      }}
+
       /* MODALITA' CHIARO (Default originaria) */
       #gf-wrap-{key} table {{
         border-collapse: separate; border-spacing:0;
         width: max-content;
-        max-width: calc(100% - 4px);
+        {max_width_style}
         font-size:{font_px}px;
         color: #111;
         background: #ffffff;
@@ -1850,7 +1857,7 @@ with col3:
             # DEFINIZIONE DELLE SCRIBILI DEI TOOLTIP IN COCKPIT CON PUNTO INTERROGATIVO PICCOLO NERO CERCHIATO (CORPO 7.5PX) SENZA LATENZA DI ATTESA
             coh_tooltip = 'Cash on Hand <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Ultima cassa liquida disponibile dichiarata nel report SEC.</span></span>'
             mb_tooltip = 'Monthly Burn <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Velocità media di bruciatura mensile delle riserve liquide tra gli ultimi due trimestri.</span></span>'
-            rc_tooltip = 'Runway Cassa <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Autonomia di cassa in mesi prima del completo esaurimento delle riserve.</span></span>'
+            rc_tooltip = 'Runway Cassa <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Autonomia di cassa in mesi prima del completo esaurimento delle riserves.</span></span>'
             car_tooltip = 'Cash / Current Assets % <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Indica quanta parte delle attività correnti dichiarate è composta da cassa liquida reale.</span></span>'
             ltr_tooltip = 'Liquidity Test Ratio <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Cassa liquida divisa per le passività correnti (debiti entro l\'anno). Sotto 1.2 indica alto rischio di insolvenza immediata e diluizione forzata.</span></span>'
 
