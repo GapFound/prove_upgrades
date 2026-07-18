@@ -16,10 +16,9 @@ from plotly.subplots import make_subplots
 import plotly.graph_objects as go
 
 from IPython.display import display, clear_output
+from bs4 import BeautifulSoup
 
 import yfinance as yf
-from finvizfinance.quote import finvizfinance
-
 import streamlit as st
 import streamlit.components.v1 as components
 import pickle
@@ -90,6 +89,53 @@ def get_ocf_burn(us_gaap, cash_val):
         monthly_burn = -ocf_val / ocf_months
         return monthly_burn
     return None
+
+# FUNZIONE PER ESTRARRE I DATI STATISTICI FONDAMENTALI DA STOCKANALYSIS IN SOSTITUZIONE DI FINVIZ
+def fetch_stockanalysis_stats(nome_ticker):
+    default_stats = {
+        'M.Cap': ' - ',
+        'Outstand.': ' - ',
+        'Float': ' - ',
+        'Insider': ' - ',
+        'Inst.O.': ' - ',
+        'S.Float': ' - '
+    }
+    try:
+        url = f"https://stockanalysis.com/stocks/{nome_ticker.lower()}/statistics/"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        res = requests.get(url, headers=headers, timeout=5)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            
+            stats = {}
+            # Raccoglie tutti gli elementi delle tabelle statistiche di StockAnalysis
+            for row in soup.find_all('tr'):
+                cells = row.find_all('td')
+                if len(cells) >= 2:
+                    label = cells[0].get_text(strip=True)
+                    val = cells[1].get_text(strip=True)
+                    stats[label] = val
+            
+            def find_val(possible_keys):
+                for pk in possible_keys:
+                    for k, v in stats.items():
+                        if pk.lower() in k.lower():
+                            return v
+                return ' - '
+            
+            return {
+                'M.Cap': find_val(['market cap', 'market capitalization']),
+                'Outstand.': find_val(['shares outstanding']),
+                'Float': find_val(['float']),
+                'Insider': find_val(['owned by insiders']),
+                'Inst.O.': find_val(['owned by institutions']),
+                'S.Float': find_val(['short % of float'])
+            }
+    except Exception as e:
+        print("Errore scraping StockAnalysis:", e)
+    return default_stats
 
 # FUNZIONE PER SCARICARE I DATI DI CASSA E RISK DILUTION DIRETTAMENTE DALLA SEC EDGAR (100% GRATUITA ED ILLIMITATA)
 def fetch_sec_data(cik):
@@ -467,7 +513,7 @@ def fetch_polygon_profile(nome_ticker):
         
     return default_profile
 
-# FUNZIONE PERSONALIZZATA PER LA BARRA DI SCROLL ORIZZONTALE SULLE TABELLE (CON REATTIVITA' INTEGRATA AL TEMA)
+# FUNZIONE PERSONALIZZATA PER LA BARRA DI SCROLL ORIZZONTALE SULLE TABELLE (CON REATTIVITA' E LIMITAZIONE INGOMBRO AL 95% SENZA SCALARE I CARATTERI)
 def render_table_with_slider(
     df,
     min_rows: int = 6,
@@ -495,7 +541,7 @@ def render_table_with_slider(
     html = f"""
     <div id="gf-wrap-{key}" style="
       position:relative; z-index:2147483000;
-      width:100%; max-width:100%;
+      width:95%; max-width:95%; margin-right: auto; margin-left: 0;
       box-sizing:border-box; overflow:visible;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
 
@@ -744,7 +790,7 @@ def stock_split(nome_ticker, cache_file, FMP_api_key):
 
 #%%
 
-# CARICO I DATI FONDAMENTALI DA YFINANCE (ED ESCLUDO FINVIZ)
+# CARICO I DATI FONDAMENTALI DA YFINANCE ED ESEGUO LO SCRAPING DI STATISTICA DA STOCKANALYSIS
 
 def fondamentali_func(nome_ticker):
     fond_df = nationality = exchange = sector = industry = website = None
@@ -830,33 +876,13 @@ def fondamentali_func(nome_ticker):
         if not website:
             website = cached_profile.get('website', '')
         
-    # 3. Fondamentali da Finviz (riattivato usando la libreria standard che viene catturata in try/except)
-    fondamentali_fz = {
-        market_cap: ' - ', outstanding: ' - ', shares_float: ' - ',
-        insider_own: ' - ', inst_own: ' - ', short_float: ' - ' 
-    }
-    try:
-        stock = finvizfinance(nome_ticker)
-        finvitz_data = stock.ticker_fundament()
+    # 3. Fondamentali da StockAnalysis (in sostituzione permanente di Finviz)
+    fondamentali_sa = fetch_stockanalysis_stats(nome_ticker)
         
-        def prendi_voce(voce):
-            return finvitz_data.get(voce, ' - ')
-            
-        fondamentali_fz = {
-            market_cap: prendi_voce('Market Cap'),
-            outstanding: prendi_voce('Shs Outstand'),
-            shares_float: prendi_voce('Shs Float'),
-            insider_own: prendi_voce('Insider Own'),
-            inst_own: prendi_voce('Inst Own'),
-            short_float: prendi_voce('Short Float')
-        }
-    except Exception as e:
-        print("Errore caricamento Finviz:", e)
-        
-    fond_fz_df = pd.DataFrame({'a': fondamentali_fz.keys(), 'Fz': fondamentali_fz.values()})
+    fond_sa_df = pd.DataFrame({'a': fondamentali_sa.keys(), 'Sa': fondamentali_sa.values()})
     fond_yf_df = pd.DataFrame({'a': fondamentali_yf.keys(), 'Yf': fondamentali_yf.values()})
     
-    fond_df = fond_fz_df.merge(fond_yf_df, on='a').set_index('a')
+    fond_df = fond_sa_df.merge(fond_yf_df, on='a').set_index('a')
     fond_df.index.name = None
     return fond_df, nationality_exchange, sector_industry, website
 
@@ -1565,8 +1591,8 @@ with col3:
     # ---------------------------------------------------------------------------------
     if 'dati_storici' in st.session_state and st.session_state['dati_storici'] is not None:
         
-        # SPACER VERTICALE PER ABBASSARE IL COCKPIT ALLINEANDOLO SULLA STESSA LINEA ORIZZONTALE DELLA TABELLA DI COLONNA 2
-        st.markdown("<div style='height: 195px;'></div>", unsafe_allow_html=True)
+        # SPACER VERTICALE DIMEZZATO ESATTAMENTE A 95PX PER ALLINEARE IL COCKPIT ALL'ALTEZZA IDEALE DELLA TABELLA DI COLONNA 2
+        st.markdown("<div style='height: 95px;'></div>", unsafe_allow_html=True)
         
         cached_profile = st.session_state.get('cached_profile', None)
         cik = ""
