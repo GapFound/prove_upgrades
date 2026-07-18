@@ -75,6 +75,11 @@ def get_ocf_burn(us_gaap, cash_val):
         'NetCashFlowsFromUsedInOperatingActivities'
     ]
     ocf_val, ocf_form, ocf_units = get_latest_fact(us_gaap, ocf_tags)
+    
+    # Se il flusso di cassa operativo è positivo (generazione di cassa), ritorniamo 0.0 (nessun burn)
+    if ocf_val is not None and ocf_val >= 0:
+        return 0.0
+        
     if ocf_val is not None and ocf_val < 0:
         # Trova l'ultima voce per calcolare i mesi di copertura reali dell'OCF (duration)
         latest_ocf = ocf_units[-1]
@@ -236,15 +241,22 @@ def fetch_sec_data(cik):
             ocf_burn = get_ocf_burn(us_gaap, cash_val)
             
             if ocf_burn is not None and cash_val is not None:
-                monthly_burn_val = ocf_burn
-                runway_val = cash_val / monthly_burn_val
-                runway_str = f"{runway_val:.2f} Mesi"
-                if runway_val < 3.0:
-                    risk_status = "RED"
-                elif runway_val < 12.0 and risk_status != "RED":
-                    risk_status = "YELLOW"
+                if ocf_burn == 0.0:
+                    # CASSA GENERATA DA OPERAZIONI (Vero Cash Flow Positivo)
+                    monthly_burn_val = None
+                    runway_str = "Cash Flow +"
+                    risk_status = "GREEN"
+                else:
+                    # OPERAZIONI IN PERDITA (Vero Burn Rate Operativo)
+                    monthly_burn_val = ocf_burn
+                    runway_val = cash_val / monthly_burn_val
+                    runway_str = f"{runway_val:.2f} Mesi"
+                    if runway_val < 3.0:
+                        risk_status = "RED"
+                    elif runway_val < 12.0 and risk_status != "RED":
+                        risk_status = "YELLOW"
             else:
-                # FALLBACK: Variazione temporale del saldo di cassa se l'OCF è assente o positivo
+                # FALLBACK: Variazione temporale del saldo di cassa se l'OCF è assente
                 if cash_units:
                     # Seleziona i report ufficiali per ridurre il rumore, altrimenti usa tutti i record disponibili
                     official_units = [u for u in cash_units if u.get('form') in ['10-Q', '10-K', '20-F']]
@@ -292,7 +304,7 @@ def fetch_sec_data(cik):
                                 elif runway_val < 12.0 and risk_status != "RED":
                                     risk_status = "YELLOW"
                             elif cash_change < 0:
-                                # SOLVENCY OVERRIDE: Se la liquidità è critica, non possiamo mostrare un finto Cash Flow Positivo
+                                # SOLVENCY OVERRIDE: Se la liquidità è critica e la cassa sale, mostriamo trattino neutro per incertezza sui finanziamenti
                                 is_insolvent = False
                                 if liq_val is not None and liq_val < 1.2:
                                     is_insolvent = True
@@ -301,7 +313,7 @@ def fetch_sec_data(cik):
                                     
                                 if is_insolvent:
                                     monthly_burn_val = None
-                                    runway_str = "Critico / Illiquido"
+                                    runway_str = " - "
                                     risk_status = "RED"
                                 else:
                                     monthly_burn_val = 0.0
@@ -1295,7 +1307,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# RIPRISTINATE LE PROPORZIONI ORIGINARIE: COLONNA 1 RIPORTATA ALL'11%, COLONNA 2 AL 49% E COLONNA 3 AL 40% PER MASSIMA OMOGENEITA' VISIVA
+# PROPORZIONI AGGIORNATE: RIPRISTINATA COLONNA 1 AL PESO ORIGINALE DI 0.11, COLONNA 2 AL 49% E COLONNA 3 AL 40% PER MASSIMA ARMONIA VISIVA
 col1, col2, col3 = st.columns([0.11, 0.49, 0.40])   
     
 # INSERISCO il TICKER
@@ -1524,7 +1536,7 @@ with col2:
            st.write(""); st.write("")
            
            if not v_gaps.empty:
-               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 2 DEI GAPPERS (reset_index=True, ingombro ridotto all'85% per garantire una netta separazione visiva da colonna 3)
+               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 2 DEI GAPPERS (reset_index=True, ingombro riallineato stabilmente al 95% per simmetria perfetta)
                render_table_with_slider(v_gaps, key="gaps", reset_index=True, font_px=11.5, width_pct=95)
                
                # CALCOLO E VISUALIZZAZIONE DELLE STATISTICHE DI CHIUSURA RED/GREEN DEI GAPPER FILTRATI (CON CONTEGGIO MINIMALISTA IN REGULAR)
@@ -1669,9 +1681,9 @@ with col3:
                 else:
                     # Se non ci sono registrazioni di offering recenti negli ultimi 6 mesi, usiamo la Runway per definire l'opportunità
                     raw_runway = sec_data.get('runway_months', ' - ')
-                    if "Cash Flow" in raw_runway or "+" in raw_runway:
+                    if "Cash Flow" in runway_val_str or "Positive" in runway_val_str or "+" in runway_val_str:
                         edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi.<br>Trend finanziario solido (flusso di cassa positivo)."
-                    elif "Critico" in raw_runway or "Illiquido" in raw_runway:
+                    elif "Critico" in runway_val_str or "Illiquido" in runway_val_str:
                         edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi.<br>Solvibilità critica o cassa illiquida (rischio diluizione imminente)."
                     else:
                         try:
@@ -1743,15 +1755,15 @@ with col3:
             metrics_top_html = f"""
             <div style="display: flex; gap: 10px; margin-bottom: 15px; font-family: system-ui,-apple-system; box-sizing: border-box;">
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Ultima cassa liquida disponibile dichiarata nel report SEC.">Cash on Hand ℹ️</div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Ultima cassa liquida disponibile dichiarata nel report SEC.">Cash on Hand ❔</div>
                     <div style="font-size: 18px; font-weight: bold; color: var(--text-news);">{cash_on_hand_val}</div>
                 </div>
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Velocità media di bruciatura mensile delle riserve liquide tra gli ultimi due trimestri.">Monthly Burn ℹ️</div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Velocità media di bruciatura mensile delle riserve liquide tra gli ultimi due trimestri.">Monthly Burn ❔</div>
                     <div style="font-size: 18px; font-weight: bold; color: var(--text-news);">{monthly_burn_val_str}</div>
                 </div>
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Autonomia di cassa in mesi prima del completo esaurimento delle riserve (Sotto i 3 mesi: Rosso, Sotto i 12 mesi: Arancione, Sopra i 12: Verde).">Runway Cassa ℹ️</div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Autonomia di cassa in mesi prima del completo esaurimento delle riserve (Sotto i 3 mesi: Rosso, Sotto i 12 mesi: Arancione, Sopra i 12: Verde).">Runway Cassa ❔</div>
                     <div style="font-size: 18px; font-weight: bold; color: {runway_color};">{runway_val_str}</div>
                 </div>
             </div>
@@ -1762,11 +1774,11 @@ with col3:
             metrics_bottom_html = f"""
             <div style="display: flex; gap: 10px; margin-bottom: 20px; font-family: system-ui,-apple-system; box-sizing: border-box;">
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Indica quanta parte delle attività correnti dichiarate è composta da cassa liquida reale. Sotto il 20%: Rosso (attività illiquide).">Cash / Current Assets % ℹ️</div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Indica quanta parte delle attività correnti dichiarate è composta da cassa liquida reale. Sotto il 20%: Rosso (attività illiquide).">Cash / Current Assets % ❔</div>
                     <div style="font-size: 18px; font-weight: bold; color: {ratio_color};">{curr_assets_ratio_val}</div>
                 </div>
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Cassa liquida divisa per le passività correnti (debiti entro l'anno). Sotto 1.2 indica alto rischio di insolvenza immediata e diluizione forzata (Rosso).">Liquidity Test Ratio ℹ️</div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Cassa liquida divisa per le passività correnti (debiti entro l'anno). Sotto 1.2 indica alto rischio di insolvenza immediata e diluizione forzata (Rosso).">Liquidity Test Ratio ❔</div>
                     <div style="font-size: 18px; font-weight: bold; color: {liq_color};">{liquidity_test_val}</div>
                 </div>
             </div>
