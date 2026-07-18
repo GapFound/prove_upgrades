@@ -1307,7 +1307,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# PROPORZIONI AGGIORNATE: RIPRISTINATA COLONNA 1 AL PESO ORIGINALE DI 0.11, COLONNA 2 AL 49% E COLONNA 3 AL 40% PER MASSIMA ARMONIA VISIVA
+# PROPORZIONI RIPRISTINATE: COLONNA 1 AL PESO ORIGINALE DI 0.11, COLONNA 2 AL 49% E COLONNA 3 AL 40% PER MASSIMA OMOGENEITA' VISIVA
 col1, col2, col3 = st.columns([0.11, 0.49, 0.40])   
     
 # INSERISCO il TICKER
@@ -1473,8 +1473,12 @@ with col1:
             )
             st.markdown(ticker_info_html, unsafe_allow_html=True)
 
+            # COPIA DEL DATAFRAME PER INIETTARE L'HTML DEL PUNTO INTERROGATIVO CON TOOLTIP NELLA CELLA IN ALTO A SINISTRA (escape=False)
+            fond_df_copy = st.session_state['fondamentali'].copy()
+            fond_df_copy.index.name = '<span title="Sa = StockAnalysis&#10;Yf = YahooFinance" style="cursor:help; font-size:12px;">❔</span>'
+
             # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 1 DEI FONDAMENTALI (reset_index=False per mantenere M.Cap, Outstand, ecc. e font_px=10.0 per massima leggibilita' ed ingombro al 100% della colonna stretta 0.11)
-            render_table_with_slider(st.session_state['fondamentali'], key="fond", reset_index=False, font_px=10.0, min_rows=6, max_rows=6, width_pct=100)
+            render_table_with_slider(fond_df_copy, key="fond", reset_index=False, font_px=10.0, min_rows=6, max_rows=6, width_pct=100, escape=False)
             print(st.session_state['fondamentali'])
                    
             if not st.session_state['dati_split'].empty:
@@ -1681,9 +1685,9 @@ with col3:
                 else:
                     # Se non ci sono registrazioni di offering recenti negli ultimi 6 mesi, usiamo la Runway per definire l'opportunità
                     raw_runway = sec_data.get('runway_months', ' - ')
-                    if "Cash Flow" in runway_val_str or "Positive" in runway_val_str or "+" in runway_val_str:
+                    if "Cash Flow" in raw_runway or "Positive" in raw_runway or "+" in raw_runway:
                         edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi.<br>Trend finanziario solido (flusso di cassa positivo)."
-                    elif "Critico" in runway_val_str or "Illiquido" in runway_val_str:
+                    elif "Critico" in raw_runway or "Illiquido" in raw_runway:
                         edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi.<br>Solvibilità critica o cassa illiquida (rischio diluizione imminente)."
                     else:
                         try:
@@ -1770,7 +1774,7 @@ with col3:
             """
             st.markdown(metrics_top_html, unsafe_allow_html=True)
             
-            # Griglia di metriche inferiori di solvibilità (Ratio e Liquidity Test)
+            # Griglia di metriche inferiores di solvibilità (Ratio e Liquidity Test)
             metrics_bottom_html = f"""
             <div style="display: flex; gap: 10px; margin-bottom: 20px; font-family: system-ui,-apple-system; box-sizing: border-box;">
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
