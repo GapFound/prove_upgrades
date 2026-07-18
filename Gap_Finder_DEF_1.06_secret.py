@@ -467,7 +467,7 @@ def fetch_polygon_profile(nome_ticker):
         
     return default_profile
 
-# FUNZIONE PERSONALIZZATA PER LA BARRA DI SCROLL ORIZZONTALE SULLE TABELLE
+# FUNZIONE PERSONALIZZATA PER LA BARRA DI SCROLL ORIZZONTALE SULLE TABELLE (CON REATTIVITA' INTEGRATA AL TEMA)
 def render_table_with_slider(
     df,
     min_rows: int = 6,
@@ -501,7 +501,7 @@ def render_table_with_slider(
 
       <div id="gf-scroller-{key}" style="
         overflow-y:auto; overflow-x:hidden;
-        border:1px solid #ddd; height:{scroller_h}px;
+        height:{scroller_h}px;
         width:100%; max-width:100%; box-sizing:border-box;
         padding-bottom:2px; padding-right:2px;">
         <div id="gf-content-{key}">
@@ -518,11 +518,14 @@ def render_table_with_slider(
     </div>
 
     <style>
+      /* MODALITA' CHIARO (Default originaria) */
       #gf-wrap-{key} table {{
         border-collapse: separate; border-spacing:0;
         width: max-content;
         max-width: calc(100% - 4px);
         font-size:11.5px;
+        color: #111;
+        background: #ffffff;
       }}
       #gf-wrap-{key} th, #gf-wrap-{key} td {{
         padding:6px 4.6px;
@@ -534,6 +537,7 @@ def render_table_with_slider(
       #gf-wrap-{key} thead th {{
         position: sticky; top: 0;
         background:#fafafa; z-index:1;
+        color: #111;
       }}
       #gf-wrap-{key} thead th:first-child,
       #gf-wrap-{key} tbody td:first-child {{
@@ -542,6 +546,8 @@ def render_table_with_slider(
         color:#444;
       }}
       #gf-scroller-{key} {{
+        border:1px solid #ddd;
+        background: #ffffff;
         -ms-overflow-style: none;        
         scrollbar-width: none;           
       }}
@@ -553,6 +559,31 @@ def render_table_with_slider(
       .gf-handle {{ position:absolute; top:40%; width:12px; height:12px; background:#d00; border:2px solid #fff; border-radius:50%; transform:translate(-50%,-50%); left:10px; box-shadow:0 0 0 1px rgba(0,0,0,.15); cursor:grab; z-index:2147483400; }}
       .gf-handle:active {{ cursor:grabbing; }}
       .gf-range-ghost {{ position:absolute; left:0; right:0; top:0; bottom:0; width:100%; height:100%; opacity:0; cursor:ew-resize; z-index:2147483300; }}
+
+      /* MODALITA' SCURO (Overriding reattivo basato sulle preferenze browser/Streamlit) */
+      @media (prefers-color-scheme: dark) {{
+        #gf-wrap-{key} table {{
+          color: #ffffff;
+          background: #000000;
+        }}
+        #gf-wrap-{key} thead th {{
+          background: #000000;
+          color: #ffffff;
+        }}
+        #gf-wrap-{key} th, #gf-wrap-{key} td {{
+          border-bottom: 1px solid #333;
+          border-right: 1px solid #333;
+          color: #ffffff;
+        }}
+        #gf-scroller-{key} {{
+          border: 1px solid #333;
+          background: #000000;
+        }}
+        #gf-wrap-{key} thead th:first-child,
+        #gf-wrap-{key} tbody td:first-child {{
+          color: #cccccc;
+        }}
+      }}
     </style>
 
     <script>
@@ -1184,6 +1215,32 @@ st.set_page_config(
     layout="wide",  
 ) 
 
+# MOTORE REATTIVO CSS (Imposta le variabili in base al tema scuro o chiaro rilevato)
+st.markdown("""
+    <style>
+      :root {
+        --card-bg: #fafafa;
+        --card-border: #eee;
+        --badge-bg: #ffffff;
+        --badge-border: #e0e0e0;
+        --text-news: #111111;
+        --date-color: #666666;
+        --sec-link-color: #d00;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --card-bg: #000000;
+          --card-border: #333333;
+          --badge-bg: #000000;
+          --badge-border: #333333;
+          --text-news: #ffffff;
+          --date-color: #aaaaaa;
+          --sec-link-color: #ff4b4b;
+        }
+      }
+    </style>
+""", unsafe_allow_html=True)
+
 # RESTRETTA LA COLONNA 3 PER DISTANZIARLA MAGGIORMENTE DALLA COLONNA 2
 col1, col2, col3 = st.columns([0.11, 0.49, 0.40])   
     
@@ -1439,7 +1496,7 @@ with col2:
                     </div>
                 """)
                
-           # SOTTO-COLONNE SIMMETRICHE PER CENTRARE PERFETTAMENTE IL BLOCCO DELLE NEWS SOTTO LE STATISTICHE
+           # SOTTO-COLONNE SIMMETRICHE PER CENTRARE PERFETTEMENTE IL BLOCCO DELLE NEWS SOTTO LE STATISTICHE
            col2_4, col2_5, col2_6 = st.columns([0.10, 0.80, 0.10])
           
            with col2_5: 
@@ -1473,15 +1530,15 @@ with col2:
                                if not link.startswith('http'):
                                     link = "https://finviz.com/" + b['Link']
                                         
-                               # USATO ST.MARKDOWN BLINDATO PER RISOLVERE ALL'ORIGINE I CONFLITTI DI APERTURA IN NUOVA SCHEDA
-                               news_html += f'<div style="text-align:left; font-size:13px; margin-bottom:6px; line-height:1.3;"><strong style="color:red;">{data_da_stampa}</strong>&nbsp;<a href="{link}" style="text-decoration:none; color:inherit;" target="_blank">{b["Title"]}</a></div>'
+                               # USATO ST.MARKDOWN BLINDATO PER RISOLVERE ALL'ORIGINE I CONFLITTI DI APERTURA IN NUOVA SCHEDA E ADATTARSI AL TEMA
+                               news_html += f'<div style="text-align:left; font-size:13px; margin-bottom:6px; line-height:1.3;"><strong style="color:red;">{data_da_stampa}</strong>&nbsp;<a href="{link}" style="text-decoration:none; color: var(--text-news);" target="_blank">{b["Title"]}</a></div>'
                            
                            # STAMPATO UNICAMENTE UNA VOLTA FUORI DAL LOOP ATTRAVERSO ST.MARKDOWN
                            st.markdown(news_html, unsafe_allow_html=True)
 
                    if isinstance(st.session_state['news'], str):
                            # USATO ST.MARKDOWN PROTETTO CON STRINGA PIATTA
-                           news_str_html = f'<div style="text-align:center; font-size:14px;">{st.session_state["news"]}</div>'
+                           news_str_html = f'<div style="text-align:center; font-size:14px; color: var(--text-news);">{st.session_state["news"]}</div>'
                            st.markdown(news_str_html, unsafe_allow_html=True)
 
 with col3:
@@ -1612,22 +1669,22 @@ with col3:
             curr_assets_ratio_val = sec_data.get('current_assets_ratio', ' - ')
             liquidity_test_val = sec_data.get('liquidity_test', ' - ')
 
-            # 1. AUTONOMIA DI CASSA (CASH RUNWAY) SPOSTATA IN CIMA
+            # 1. AUTONOMIA DI CASSA (CASH RUNWAY) SPOSTATA IN CIMA (Con variabili CSS dinamiche per sfondi neri in Dark Mode)
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-bottom: 10px;'>📊 AUTONOMIA DI CASSA (CASH RUNWAY)</div>", unsafe_allow_html=True)
             
             # Griglia di metriche superiori (Cassa, Burn, Runway)
             metrics_top_html = f"""
             <div style="display: flex; gap: 10px; margin-bottom: 15px; font-family: system-ui,-apple-system; box-sizing: border-box;">
-                <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Ultima cassa liquida disponibile dichiarata nel report SEC.">Cash on Hand ℹ️</div>
-                    <div style="font-size: 18px; font-weight: bold; color: #111;">{cash_on_hand_val}</div>
+                <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Ultima cassa liquida disponibile dichiarata nel report SEC.">Cash on Hand ℹ️</div>
+                    <div style="font-size: 18px; font-weight: bold; color: var(--text-news);">{cash_on_hand_val}</div>
                 </div>
-                <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Velocità media di bruciatura mensile delle riserve liquide tra gli ultimi due trimestri.">Monthly Burn ℹ️</div>
-                    <div style="font-size: 18px; font-weight: bold; color: #111;">{monthly_burn_val_str}</div>
+                <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Velocità media di bruciatura mensile delle riserve liquide tra gli ultimi due trimestri.">Monthly Burn ℹ️</div>
+                    <div style="font-size: 18px; font-weight: bold; color: var(--text-news);">{monthly_burn_val_str}</div>
                 </div>
-                <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Autonomia di cassa in mesi prima del completo esaurimento delle riserve (Sotto i 3 mesi: Rosso, Sotto i 12 mesi: Arancione, Sopra i 12: Verde).">Runway Cassa ℹ️</div>
+                <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Autonomia di cassa in mesi prima del completo esaurimento delle riserve (Sotto i 3 mesi: Rosso, Sotto i 12 mesi: Arancione, Sopra i 12: Verde).">Runway Cassa ℹ️</div>
                     <div style="font-size: 18px; font-weight: bold; color: {runway_color};">{runway_val_str}</div>
                 </div>
             </div>
@@ -1637,28 +1694,28 @@ with col3:
             # Griglia di metriche inferiori di solvibilità (Ratio e Liquidity Test)
             metrics_bottom_html = f"""
             <div style="display: flex; gap: 10px; margin-bottom: 20px; font-family: system-ui,-apple-system; box-sizing: border-box;">
-                <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Indica quanta parte delle attività correnti dichiarate è composta da cassa liquida reale. Sotto il 20%: Rosso (attività illiquide).">Cash / Current Assets % ℹ️</div>
+                <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Indica quanta parte delle attività correnti dichiarate è composta da cassa liquida reale. Sotto il 20%: Rosso (attività illiquide).">Cash / Current Assets % ℹ️</div>
                     <div style="font-size: 18px; font-weight: bold; color: {ratio_color};">{curr_assets_ratio_val}</div>
                 </div>
-                <div style="flex: 1; background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Cassa liquida divisa per le passività correnti (debiti entro l'anno). Sotto 1.2 indica alto rischio di insolvenza immediata e diluizione forzata (Rosso).">Liquidity Test Ratio ℹ️</div>
+                <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Cassa liquida divisa per le passività correnti (debiti entro l'anno). Sotto 1.2 indica alto rischio di insolvenza immediata e diluizione forzata (Rosso).">Liquidity Test Ratio ℹ️</div>
                     <div style="font-size: 18px; font-weight: bold; color: {liq_color};">{liquidity_test_val}</div>
                 </div>
             </div>
             """
             st.markdown(metrics_bottom_html, unsafe_allow_html=True)
 
-            # 2. BLOCO OFFERINGS SPOSTATO SOTTO L'AUTONOMIA DI CASSA (Sempre bianco, NO giudizi, NO colori di background)
+            # 2. BLOCO OFFERINGS SPOSTATO SOTTO L'AUTONOMIA DI CASSA (Sfondo reattivo var(--badge-bg) che diventa nero in Dark Mode)
             risk_badge_html = f"""
-            <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-left: 5px solid #757575; padding: 12px; margin-top: 15px; margin-bottom: 20px; border-radius: 4px; font-family: system-ui,-apple-system;">
-                <div style="font-size: 13.5px; font-weight: bold; color: #333; margin-bottom: 6px;">⚠️ OFFERINGS</div>
-                <div style="color: #424242; font-size: 13px; line-height: 1.4;">{edge_msg}</div>
+            <div style="background-color: var(--badge-bg); border: 1px solid var(--badge-border); border-left: 5px solid #757575; padding: 12px; margin-top: 15px; margin-bottom: 20px; border-radius: 4px; font-family: system-ui,-apple-system;">
+                <div style="font-size: 13.5px; font-weight: bold; color: var(--text-news); margin-bottom: 6px;">⚠️ OFFERINGS</div>
+                <div style="color: var(--text-news); font-size: 13px; line-height: 1.4;">{edge_msg}</div>
             </div>
             """
             st.markdown(risk_badge_html, unsafe_allow_html=True)
             
-            # 3. Tabella degli ultimi link ai depositi SEC (I link sono applicati direttamente sul nome del modulo)
+            # 3. Tabella degli ultimi link ai depositi SEC (I link sono applicati direttamente sul nome del modulo con colori adattivi)
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 25px; margin-bottom: 8px;'>📂 ULTIMI DEPOSITI SEC EDGAR RILEVANTI</div>", unsafe_allow_html=True)
             sec_links = sec_data.get('sec_links', [])
             if sec_links:
@@ -1668,9 +1725,9 @@ with col3:
                     form_val = item["form"]
                     link_val = item["link"]
                     sec_html += f"""
-                    <div style="font-size: 13px; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid #f9f9f9; font-family: system-ui,-apple-system;">
-                        <span style="color: #666;">[{date_val}]</span>&nbsp;&nbsp;
-                        <a href="{link_val}" style="text-decoration: none; color: #d00; font-weight: bold;" target="_blank">Form {form_val}</a>
+                    <div style="font-size: 13px; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--card-border); font-family: system-ui,-apple-system;">
+                        <span style="color: var(--date-color);">[{date_val}]</span>&nbsp;&nbsp;
+                        <a href="{link_val}" style="text-decoration: none; color: var(--sec-link-color); font-weight: bold;" target="_blank">Form {form_val}</a>
                     </div>
                     """
                 st.markdown(sec_html, unsafe_allow_html=True)
@@ -1678,7 +1735,7 @@ with col3:
                 st.write("Nessun deposito SEC recente catalogato per questo ticker.")
         else:
             # Se il CIK non esiste o Polygon non ha profilato il titolo (es. ETF o Warrants)
-            error_sec_html = f'<div style="background-color: #f9f9f9; border-left: 5px solid #ccc; padding: 12px; margin-top: 15px; border-radius: 4px; font-size: 13.5px;"><b>Dati SEC Non Disponibili</b><br>Il titolo cercato non possiede un codice CIK o i dati di bilancio standard SEC non sono registrati (comune per Warrant, ETF, SPAC o OTC molto illiquidi).</div>'
+            error_sec_html = f'<div style="background-color: #f9f9f9; border-left: 5px solid #ccc; padding: 12px; margin-top: 15px; border-radius: 4px; font-size: 13.5px; color: var(--text-news);"><b>Dati SEC Non Disponibili</b><br>Il titolo cercato non possiede un codice CIK o i dati di bilancio standard SEC non sono registrati (comune per Warrant, ETF, SPAC o OTC molto illiquidi).</div>'
             st.markdown(error_sec_html, unsafe_allow_html=True)
 
 st.markdown("""
