@@ -678,13 +678,13 @@ def render_table_with_slider(
         }}
       }}
 
-      /* AGGIUNTA DEL COSTRUTTO DEL TOOLTIP DENTRO L'IFRAME PER IL PUNTO INTERROGATIVO DEI FONDAMENTALI */
-      .gf-tooltip {
+      /* AGGIUNTA DEL COSTRUTTO DEL TOOLTIP DENTRO L'IFRAME CON GRAFFE DOPPIE PER EVITARE NAMEERROR DI PYTHON */
+      .gf-tooltip {{
         position: relative;
         display: inline-block;
         cursor: help;
-      }
-      .gf-tooltip .gf-tooltiptext {
+      }}
+      .gf-tooltip .gf-tooltiptext {{
         visibility: hidden;
         width: 140px;
         background-color: #212121;
@@ -706,17 +706,17 @@ def render_table_with_slider(
         box-shadow: 0 2px 6px rgba(0,0,0,0.15);
         border: 1px solid #444;
         transition: opacity 0.1s;
-      }
-      .gf-tooltip .gf-tooltiptext.gf-tooltip-down {
+      }}
+      .gf-tooltip .gf-tooltiptext.gf-tooltip-down {{
         bottom: auto;
         top: 130%;
         left: 0;
         transform: none;
-      }
-      .gf-tooltip:hover .gf-tooltiptext {
+      }}
+      .gf-tooltip:hover .gf-tooltiptext {{
         visibility: visible;
         opacity: 1;
-      }
+      }}
     </style>
 
     <script>
