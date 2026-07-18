@@ -546,7 +546,9 @@ def render_table_with_slider(
     padding_px: int = 14,
     key: str = "tbl",
     escape: bool = True,
-    reset_index: bool = True
+    reset_index: bool = True,
+    font_px: float = 11.5,
+    width_pct: int = 95
 ):
     try:
         if reset_index:
@@ -568,7 +570,7 @@ def render_table_with_slider(
     html = f"""
     <div id="gf-wrap-{key}" style="
       position:relative; z-index:2147483000;
-      width:95%; max-width:95%; margin-right: auto; margin-left: 0;
+      width:{width_pct}%; max-width:{width_pct}%; margin-right: auto; margin-left: 0;
       box-sizing:border-box; overflow:visible;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
 
@@ -596,7 +598,7 @@ def render_table_with_slider(
         border-collapse: separate; border-spacing:0;
         width: max-content;
         max-width: calc(100% - 4px);
-        font-size:11.5px;
+        font-size:{font_px}px;
         color: #111;
         background: #ffffff;
       }}
@@ -1293,8 +1295,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# PROPORZIONI AGGIORNATE: RESTRINTA ULTERIORMENTE LA COLONNA 3 AL 35% PER GARANTIRE SEPARAZIONE E DISTANZA DA COLONNA 2
-col1, col2, col3 = st.columns([0.11, 0.54, 0.35])   
+# PROPORZIONI AGGIORNATE: RESTRINTA ULTERIORMENTE LA COLONNA 3 AL 32% PER MASSIMIZZARE IL DISTANZIAMENTO, ESPANSA COLONNA 1 DEI FONDAMENTALI AL 16% PER LEGGIBILITA'
+col1, col2, col3 = st.columns([0.16, 0.52, 0.32])   
     
 # INSERISCO il TICKER
 global nome_ticker
@@ -1459,8 +1461,8 @@ with col1:
             )
             st.markdown(ticker_info_html, unsafe_allow_html=True)
 
-            # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 1 DEI FONDAMENTALI (reset_index=False per mantenere M.Cap, Outstand, ecc.)
-            render_table_with_slider(st.session_state['fondamentali'], key="fond", reset_index=False, min_rows=6, max_rows=6)
+            # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 1 DEI FONDAMENTALI (reset_index=False per mantenere M.Cap, Outstand, ecc. e font_px=10.0 per massima leggibilita' ed ingombro 95%)
+            render_table_with_slider(st.session_state['fondamentali'], key="fond", reset_index=False, font_px=10.0, min_rows=6, max_rows=6, width_pct=95)
             print(st.session_state['fondamentali'])
                    
             if not st.session_state['dati_split'].empty:
@@ -1522,8 +1524,8 @@ with col2:
            st.write(""); st.write("")
            
            if not v_gaps.empty:
-               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 2 DEI GAPPERS (reset_index=True)
-               render_table_with_slider(v_gaps, key="gaps", reset_index=True)
+               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 2 DEI GAPPERS (reset_index=True, ingombro 90% per staccare colonna 3, font_px=11.5)
+               render_table_with_slider(v_gaps, key="gaps", reset_index=True, font_px=11.5, width_pct=90)
                
                # CALCOLO E VISUALIZZAZIONE DELLE STATISTICHE DI CHIUSURA RED/GREEN DEI GAPPER FILTRATI (CON CONTEGGIO MINIMALISTA IN REGULAR)
                total_gaps = len(v_gaps)
@@ -1573,28 +1575,18 @@ with col2:
            with col2_5: 
                    st.write(""); st.write(""); st.write(""); st.write(""); st.write("")
                    st.html(f"""
-                       <div style="text-align:center; font-size: 14px;">
-                           <b>news:</b> <br/> <br/>
+                       <div style="text-align:center; font-size: 14px; color: var(--text-news); font-family: system-ui,-apple-system;">
+                           <b>ultime news:</b> <br/> <br/>
                        </div>
                    """)
                                    
                    if isinstance(st.session_state['news'], pd.DataFrame):
                            # ACCUMULATORE PER EVITARE GLI SPAZI VERTICALI NELLE NEWS (STRINGHE PIATTE SENZA ANDARE A CAPO)
                            news_html = ""
-                           for a, b in st.session_state['news'].iterrows():
-                               ora = datetime.now().hour
-                               
-                               if ora <= 6:
-                                    formatted_date = b['Date'] - timedelta(days=1)
-                                    data_ora = datetime.now() - timedelta(days=1)
-                               else:
-                                    formatted_date = b['Date']
-                                    data_ora = datetime.now()
-                                    
-                               if formatted_date.date() != data_ora.date() and a > 0:
-                                    print(formatted_date, data_ora)
-                                    break     
-                                    
+                           # RIMOZIONE DEL FILTRO DATA: RECUPERA SEMPRE LE ULTIME 5 NEWS IN ORDINE CRONOLOGICO
+                           latest_news = st.session_state['news'].head(5)
+                           for a, b in latest_news.iterrows():
+                               formatted_date = b['Date']
                                data_da_stampa = formatted_date.strftime("%Y-%m-%d | h %H:%M")    
                         
                                link = b['Link']
