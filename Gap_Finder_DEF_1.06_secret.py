@@ -1577,7 +1577,7 @@ with col1:
             fond_df_copy = st.session_state['fondamentali'].copy()
 
             # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 1 DEI FONDAMENTALI (reset_index=False per mantenere M.Cap, Outstand, ecc. e font_px=10.0 per massima leggibilita' ed ingombro al 100% della colonna stretta 0.11)
-            render_table_with_slider(fond_df_copy, key="fond", reset_index=False, font_px=11.3, min_rows=6, max_rows=6, width_pct=100, escape=False)
+            render_table_with_slider(fond_df_copy, key="fond", reset_index=False, font_px=11, min_rows=6, max_rows=6, width_pct=100, escape=False)
             print(st.session_state['fondamentali'])
                    
             if not st.session_state['dati_split'].empty:
