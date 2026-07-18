@@ -1241,8 +1241,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# RESTRETTA LA COLONNA 3 PER DISTANZIARLA MAGGIORMENTE DALLA COLONNA 2
-col1, col2, col3 = st.columns([0.11, 0.49, 0.40])   
+# PROPORZIONI AGGIORNATE: RESTRINTA ULTERIORMENTE LA COLONNA 3 AL 35% PER GARANTIRE SEPARAZIONE E DISTANZA DA COLONNA 2
+col1, col2, col3 = st.columns([0.11, 0.54, 0.35])   
     
 # INSERISCO il TICKER
 global nome_ticker
@@ -1480,12 +1480,30 @@ with col2:
                red_pct = (red_count / total_gaps) * 100
                green_pct = (green_count / total_gaps) * 100
                
+               # CALCOLO ROBUSTO E DINAMICO DELLE MEDIANE DELLE COLONNE RICHIESTE SUL DATAFRAME NUMERICO "GAPS"
+               med_gap = gaps['Gap %'].median()
+               med_up = gaps['Max % UP'].median()
+               med_down = gaps['Max % DOWN'].median()
+               med_otc = gaps['Open to Close %'].median()
+               
+               # FORMATTAZIONE COERENTE IN STANDARD ITALIANO (SOSTITUZIONE PUNTO CON VIRGOLA)
+               med_gap_str = f"{med_gap:.2f}".replace('.', ',')
+               med_up_str = f"{med_up:.2f}".replace('.', ',')
+               med_down_str = f"{med_down:.2f}".replace('.', ',')
+               med_otc_str = f"{med_otc:.2f}".replace('.', ',')
+               
                st.html(f"""
                    <div style="text-align: center; font-size: 15px; font-weight: normal; margin-top: 10px; margin-bottom: 2px;">
                        {red_count} vs {green_count}
                    </div>
                    <div style="text-align: center; font-size: 13.5px; margin-top: 0px; margin-bottom: 5px; font-weight: bold;">
                        🟥 RED: {red_pct:.2f}% &nbsp;|&nbsp; GREEN: {green_pct:.2f}% 🟩
+                   </div>
+                   <div style="text-align: center; font-size: 12.5px; margin-top: 6px; color: var(--text-news); font-family: system-ui,-apple-system; font-weight: normal;">
+                       Mediana Gap: <b>{med_gap_str}%</b> &nbsp;|&nbsp; 
+                       Mediana Max UP: <b>{med_up_str}%</b> &nbsp;|&nbsp; 
+                       Mediana Max DOWN: <b>{med_down_str}%</b> &nbsp;|&nbsp; 
+                       Mediana Open to Close: <b>{med_otc_str}%</b>
                    </div>
                """)
            else:
@@ -1496,7 +1514,7 @@ with col2:
                     </div>
                 """)
                
-           # SOTTO-COLONNE SIMMETRICHE PER CENTRARE PERFETTEMENTE IL BLOCCO DELLE NEWS SOTTO LE STATISTICHE
+           # SOTTO-COLONNE SIMMETRICHE PER CENTRARE PERFETTAMENTE IL BLOCCO DELLE NEWS SOTTO LE STATISTICHE
            col2_4, col2_5, col2_6 = st.columns([0.10, 0.80, 0.10])
           
            with col2_5: 
@@ -1546,6 +1564,10 @@ with col3:
     # LA PARTE DESTRA (COL3) DIVENTA ORA IL COCKPIT GRAFICO DI ANALISI DILUIZIONE & RISK SEC (FORMATTAZIONE OTTIMIZZATA DI LUCA)
     # ---------------------------------------------------------------------------------
     if 'dati_storici' in st.session_state and st.session_state['dati_storici'] is not None:
+        
+        # SPACER VERTICALE PER ABBASSARE IL COCKPIT ALLINEANDOLO SULLA STESSA LINEA ORIZZONTALE DELLA TABELLA DI COLONNA 2
+        st.markdown("<div style='height: 195px;'></div>", unsafe_allow_html=True)
+        
         cached_profile = st.session_state.get('cached_profile', None)
         cik = ""
         if isinstance(cached_profile, dict):
@@ -1669,7 +1691,7 @@ with col3:
             curr_assets_ratio_val = sec_data.get('current_assets_ratio', ' - ')
             liquidity_test_val = sec_data.get('liquidity_test', ' - ')
 
-            # 1. AUTONOMIA DI CASSA (CASH RUNWAY) SPOSTATA IN CIMA (Con variabili CSS dinamiche per sfondi neri in Dark Mode)
+            # 1. AUTONOMIA DI CASSA (CASH RUNWAY) IN CIMA AL COCKPIT (Sfondi dinamici neri `#000000` in Dark Mode tramite variabili CSS)
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-bottom: 10px;'>📊 AUTONOMIA DI CASSA (CASH RUNWAY)</div>", unsafe_allow_html=True)
             
             # Griglia di metriche superiori (Cassa, Burn, Runway)
@@ -1706,7 +1728,7 @@ with col3:
             """
             st.markdown(metrics_bottom_html, unsafe_allow_html=True)
 
-            # 2. BLOCO OFFERINGS SPOSTATO SOTTO L'AUTONOMIA DI CASSA (Sfondo reattivo var(--badge-bg) che diventa nero in Dark Mode)
+            # 2. BLOCO OFFERINGS SPOSTATO SOTTO L'AUTONOMIA DI CASSA (Sfondo var(--badge-bg) che diventa nero in Dark Mode, NO colori, NO giudizi)
             risk_badge_html = f"""
             <div style="background-color: var(--badge-bg); border: 1px solid var(--badge-border); border-left: 5px solid #757575; padding: 12px; margin-top: 15px; margin-bottom: 20px; border-radius: 4px; font-family: system-ui,-apple-system;">
                 <div style="font-size: 13.5px; font-weight: bold; color: var(--text-news); margin-bottom: 6px;">⚠️ OFFERINGS</div>
@@ -1715,7 +1737,7 @@ with col3:
             """
             st.markdown(risk_badge_html, unsafe_allow_html=True)
             
-            # 3. Tabella degli ultimi link ai depositi SEC (I link sono applicati direttamente sul nome del modulo con colori adattivi)
+            # 3. Tabella degli ultimi link ai depositi SEC (I link sono applicati direttamente sul nome del modulo con colore var(--sec-link-color))
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 25px; margin-bottom: 8px;'>📂 ULTIMI DEPOSITI SEC EDGAR RILEVANTI</div>", unsafe_allow_html=True)
             sec_links = sec_data.get('sec_links', [])
             if sec_links:
