@@ -1525,7 +1525,7 @@ with col2:
            
            if not v_gaps.empty:
                # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 2 DEI GAPPERS (reset_index=True, ingombro ridotto all'85% per garantire una netta separazione visiva da colonna 3)
-               render_table_with_slider(v_gaps, key="gaps", reset_index=True, font_px=11.5, width_pct=85)
+               render_table_with_slider(v_gaps, key="gaps", reset_index=True, font_px=11.5, width_pct=95)
                
                # CALCOLO E VISUALIZZAZIONE DELLE STATISTICHE DI CHIUSURA RED/GREEN DEI GAPPER FILTRATI (CON CONTEGGIO MINIMALISTA IN REGULAR)
                total_gaps = len(v_gaps)
