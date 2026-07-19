@@ -1800,14 +1800,14 @@ with col3:
                 cash_msg = "Trend finanziario solido - flusso di cassa positivo"
                 cash_color = "#2e7d32" # Verde
             elif "Critico" in raw_runway or "Illiquido" in raw_runway:
-                cash_msg = "Solvibilità critica - LTR < 1.2 - rischio diluizione"
+                cash_msg = "Solvibilità critica - Liquidity Test Ratio < 1.2 - rischio diluizione"
                 cash_color = "#c62828" # Rosso
             elif is_insolvent_ltr or is_insolvent_assets:
                 # Gestione splittata delle due allerte di solvibilità con SINTESI LINEARE in caso di coesistenza
                 if is_insolvent_ltr and is_insolvent_assets:
-                    cash_msg = "Solvibilità critica - Cash / Current Assets < 20% e LTR < 1.2 - rischio diluizione"
+                    cash_msg = "Solvibilità critica - Cash / Current Assets < 20% e Liquidity Test Ratio < 1.2 - rischio diluizione"
                 elif is_insolvent_ltr:
-                    cash_msg = "Solvibilità critica - LTR < 1.2 - rischio diluizione"
+                    cash_msg = "Solvibilità critica - Liquidity Test Ratio < 1.2 - rischio diluizione"
                 else:
                     cash_msg = "Solvibilità critica - Cash / Current Assets < 20% - rischio diluizione"
                 cash_color = "#c62828" # Rosso
