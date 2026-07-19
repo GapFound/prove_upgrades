@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -398,7 +399,7 @@ def fetch_sec_data(cik):
                                 has_equity = any(word in doc_text for word in magic_words)
                                 has_debt = any(word in doc_text for word in debt_words)
                                 
-                                # NUOVA LOGICA CON DISTINZIONE TRA REGISTRAZIONI PRIMARIE E SUPPLEMENTI
+                                # NUOVA LOGICA REVISIONATA CON DISTINZIONE TRA REGISTRAZIONI PRIMARIE E SUPPLEMENTI
                                 if form_type in ["S-1", "S-3", "S-1/A", "S-3/A"]:
                                     if has_equity:
                                         is_equity = True
@@ -717,7 +718,7 @@ def render_table_with_slider(
         }}
       }}
 
-      /* AGGIUNTA DEL COSTRUTTO DEL TOOLTIP DENTRO L'IFRAME CON GRAFFE DOPPIE PER EVITARE NAMEERROR DI PYTHON */
+      /* AGGIUNTA DEL COSTRUTTO DEL TOOLTIP DENTRO L'IFRAME CON GRAFFE DOPPIE (text-transform: none !important PER IMPEDIRE MAIUSCOLE EREDITATE) */
       .gf-tooltip {{
         position: relative;
         display: inline-block;
@@ -745,6 +746,7 @@ def render_table_with_slider(
         box-shadow: 0 2px 6px rgba(0,0,0,0.15);
         border: 1px solid #444;
         transition: opacity 0.1s;
+        text-transform: none !important;
       }}
       .gf-tooltip .gf-tooltiptext.gf-tooltip-down {{
         bottom: auto;
@@ -1396,7 +1398,7 @@ st.markdown("""
         }
       }
 
-      /* STILE DEL TOOLTIP ISTANTANEO IN PURO CSS */
+      /* STILE DEL TOOLTIP ISTANTANEO IN PURO CSS (FORZATO CON text-transform: none !important PER ESCLUDERE EREDITARIETÀ DELLE MAIUSCOLE) */
       .gf-tooltip {
         position: relative;
         display: inline-block;
@@ -1424,6 +1426,7 @@ st.markdown("""
         box-shadow: 0 2px 6px rgba(0,0,0,0.15);
         border: 1px solid #444;
         transition: opacity 0.1s;
+        text-transform: none !important;
       }
       /* Posizionamento specifico verso il basso per l'angolo a sinistra */
       .gf-tooltip .gf-tooltiptext.gf-tooltip-down {
@@ -1794,15 +1797,15 @@ with col3:
 
             # GERARCHIA DELLE VALUTAZIONI (IL CASO APPLE/BLUE CHIP È RISOLTO CON PRIORITÀ ASSOLUTA)
             if "Cash Flow" in raw_runway or "Positive" in raw_runway or "+" in raw_runway:
-                cash_msg = "Trend finanziario solido - flusso di cassa operativo OCF positivo"
+                cash_msg = "Trend finanziario solido - flusso di cassa positivo"
                 cash_color = "#2e7d32" # Verde
             elif "Critico" in raw_runway or "Illiquido" in raw_runway:
                 cash_msg = "Solvibilità critica - LTR < 1.2 - rischio diluizione"
                 cash_color = "#c62828" # Rosso
             elif is_insolvent_ltr or is_insolvent_assets:
-                # Gestione splittata delle due allerte di solvibilità
+                # Gestione splittata delle due allerte di solvibilità con SINTESI LINEARE in caso di coesistenza
                 if is_insolvent_ltr and is_insolvent_assets:
-                    cash_msg = "Solvibilità critica - LTR < 1.2 - rischio diluizione<br>Solvibilità critica - Cash / Current Assets < 20% - rischio diluizione"
+                    cash_msg = "Solvibilità critica - LTR < 1.2 e Cash / Current Assets < 20% - rischio diluizione"
                 elif is_insolvent_ltr:
                     cash_msg = "Solvibilità critica - LTR < 1.2 - rischio diluizione"
                 else:
