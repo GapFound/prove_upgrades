@@ -53,19 +53,30 @@ def format_millions(val):
         return ' - '
 
 # FUNZIONE INTERNA PER IL RECUPERO A CASCATA (FALLBACK) DEI TAG XBRL DELLA SEC (COMPRESO STANDARD IFRS / 20-F)
+# AGGIORNAMENTO: Esclusione dati segmentati e ordinamento cronologico per garantire l'estrazione del dato consolidato corretto
 def get_latest_fact(us_gaap, tags):
     for tag in tags:
         node = us_gaap.get(tag)
         if node:
             units = node.get('units', {}).get('USD', [])
             if units:
-                # Filtra solo i report ufficiali 10-Q (trimestrali), 10-K (annuali) e 20-F (esteri) per evitare duplicati
+                # 1. Filtra solo i report ufficiali 10-Q (trimestrali), 10-K (annuali) e 20-F (esteri) per evitare duplicati
                 official = [u for u in units if u.get('form') in ['10-Q', '10-K', '20-F']]
                 if not official:
                     official = units
-                # Ritorna il valore dell'ultimo report, il form e la lista completa
-                return float(official[-1]['val']), official[-1].get('form', '10-Q'), official
-    return None, None, None
+                
+                # 2. FILTRO ANTI-SEGMENTO: Esclude tutti i dati segmentati (non consolidati) per evitare falsi positivi
+                consolidated = [u for u in official if 'segment' not in u]
+                if not consolidated:
+                    consolidated = official # Fallback estremo se tutto fosse marchiato segment
+                
+                # 3. ORDINAMENTO CRONOLOGICO: Ordina per data di fine periodo 'end' e secondariamente per data di deposito 'filed'
+                sorted_facts = sorted(consolidated, key=lambda x: (x.get('end', ''), x.get('filed', '')))
+                
+                # Ritorna il valore dell'ultimo report consolidato, il form e la lista completa ordinata
+                if sorted_facts:
+                    return float(sorted_facts[-1]['val']), sorted_facts[-1].get('form', '10-Q'), sorted_facts
+            return None, None, None
 
 # FUNZIONE PER ESTRARRE E CALCOLARE IL BURN RATE SULL'OPERATING CASH FLOW REALE (OCF)
 def get_ocf_burn(us_gaap, cash_val):
