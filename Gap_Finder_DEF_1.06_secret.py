@@ -1805,7 +1805,7 @@ with col3:
             elif is_insolvent_ltr or is_insolvent_assets:
                 # Gestione splittata delle due allerte di solvibilità con SINTESI LINEARE in caso di coesistenza
                 if is_insolvent_ltr and is_insolvent_assets:
-                    cash_msg = "Solvibilità critica - Current Assets < 20% / LTR < 1.2 e Cash - rischio diluizione"
+                    cash_msg = "Solvibilità critica - Cash / Current Assets < 20% e LTR < 1.2 - rischio diluizione"
                 elif is_insolvent_ltr:
                     cash_msg = "Solvibilità critica - LTR < 1.2 - rischio diluizione"
                 else:
