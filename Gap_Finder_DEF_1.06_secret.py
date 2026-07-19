@@ -52,31 +52,57 @@ def format_millions(val):
     except:
         return ' - '
 
-# FUNZIONE INTERNA PER IL RECUPERO A CASCATA (FALLBACK) DEI TAG XBRL DELLA SEC (COMPRESO STANDARD IFRS / 20-F)
-# AGGIORNAMENTO: Esclusione dati segmentati e ordinamento cronologico per garantire l'estrazione del dato consolidato corretto
+# FUNZIONE INTERNA PER IL RECUPERO A CASCATA DEI TAG XBRL DELLA SEC (COMPRESO STANDARD IFRS / 20-F)
+# AGGIORNAMENTO DEFINITIVO: Scansione multi-tag con confronto cronologico incrociato per eliminare i falsi positivi da classificazione contabile obsoleta
 def get_latest_fact(us_gaap, tags):
+    best_fact = None
+    best_form = None
+    best_list = None
+    best_end_date = None
+    
     for tag in tags:
         node = us_gaap.get(tag)
         if node:
             units = node.get('units', {}).get('USD', [])
             if units:
-                # 1. Filtra solo i report ufficiali 10-Q (trimestrali), 10-K (annuali) e 20-F (esteri) per evitare duplicati
+                # 1. Filtra solo i report ufficiali 10-Q, 10-K e 20-F
                 official = [u for u in units if u.get('form') in ['10-Q', '10-K', '20-F']]
                 if not official:
                     official = units
                 
-                # 2. FILTRO ANTI-SEGMENTO: Esclude tutti i dati segmentati (non consolidati) per evitare falsi positivi
+                # 2. FILTRO ANTI-SEGMENTO: Esclude tutti i dati segmentati (non consolidati)
                 consolidated = [u for u in official if 'segment' not in u]
                 if not consolidated:
-                    consolidated = official # Fallback estremo se tutto fosse marchiato segment
+                    consolidated = official
                 
-                # 3. ORDINAMENTO CRONOLOGICO: Ordina per data di fine periodo 'end' e secondariamente per data di deposito 'filed'
+                # 3. ORDINAMENTO CRONOLOGICO: Ordina per data 'end' e secondariamente per data 'filed'
                 sorted_facts = sorted(consolidated, key=lambda x: (x.get('end', ''), x.get('filed', '')))
                 
-                # Ritorna il valore dell'ultimo report consolidato, il form e la lista completa ordinata
                 if sorted_facts:
-                    return float(sorted_facts[-1]['val']), sorted_facts[-1].get('form', '10-Q'), sorted_facts
-            return None, None, None
+                    latest_item = sorted_facts[-1]
+                    current_end_str = latest_item.get('end', '')
+                    
+                    if current_end_str:
+                        try:
+                            # Convertiamo la stringa 'end' in oggetto date per un confronto sicuro
+                            current_end_dt = datetime.strptime(current_end_str, "%Y-%m-%d").date()
+                        except ValueError:
+                            current_end_dt = None
+                        
+                        if current_end_dt:
+                            # Se è il primo tag valido trovato, o se ha una data di bilancio più recente di quella memorizzata
+                            if (best_end_date is None) or (current_end_dt > best_end_date):
+                                best_end_date = current_end_dt
+                                best_fact = float(latest_item['val'])
+                                best_form = latest_item.get('form', '10-Q')
+                                best_list = sorted_facts
+                                
+    # Se abbiamo trovato un fatto valido tra tutti i tag analizzati, lo restituiamo
+    if best_fact is not None:
+        return best_fact, best_form, best_list
+        
+    return None, None, None
+
 
 # FUNZIONE PER ESTRARRE E CALCOLARE IL BURN RATE SULL'OPERATING CASH FLOW REALE (OCF)
 def get_ocf_burn(us_gaap, cash_val):
