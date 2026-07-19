@@ -167,6 +167,7 @@ def fetch_stockanalysis_stats(nome_ticker):
     return default_stats
 
 # FUNZIONE PER SCARICARE I DATI DI CASSA E RISK DILUTION DIRETTAMENTE DALLA SEC EDGAR (100% GRATUITA ED ILLIMITATA)
+# FUNZIONE PER SCARICARE I DATI DI CASSA E RISK DILUTION DIRETTAMENTE DALLA SEC EDGAR (100% GRATUITA ED ILLIMITATA)
 def fetch_sec_data(cik):
     default_sec = {
         'cash_on_hand': ' - ',
@@ -178,6 +179,7 @@ def fetch_sec_data(cik):
         'active_offering': 'Nessun deposito SEC recente per potenziale emissione di azioni (S-1, S-3, 424B) negli ultimi 180 giorni.',
         'active_offering_date': ' - ',
         'active_offering_form': ' - ',
+        'active_offering_link': ' - ',
         'sec_links': []
     }
     if not cik or str(cik).strip() in ['', '-', ' - ']:
@@ -342,6 +344,7 @@ def fetch_sec_data(cik):
         active_offering = "Nessun deposito SEC recente per potenziale emissione di azioni (S-1, S-3, 424B) negli ultimi 180 giorni."
         active_offering_date = " - "
         active_offering_form = " - "
+        active_offering_link = " - "
         sec_links = []
         
         if sub_res.status_code == 200:
@@ -415,6 +418,7 @@ def fetch_sec_data(cik):
                                 active_offering = f" Form {form_type} depositato il {filing_date}"
                                 active_offering_date = filing_date
                                 active_offering_form = form_type
+                                active_offering_link = sec_link
                                 found_offering = True
                     except Exception as e:
                         print("Errore nel parsing del testo parziale del documento SEC:", e)
@@ -429,6 +433,7 @@ def fetch_sec_data(cik):
             'active_offering': active_offering,
             'active_offering_date': active_offering_date,
             'active_offering_form': active_offering_form,
+            'active_offering_link': active_offering_link,
             'sec_links': sec_links
         }
     except Exception as e:
@@ -1831,8 +1836,12 @@ with col3:
             offering_msg = "Nessun deposito SEC recente per potenziale emissione di azioni (S-1, S-3, 424B) negli ultimi 180 giorni."
             offering_date_str = sec_data.get('active_offering_date', ' - ')
             form_type = sec_data.get('active_offering_form', ' - ')
+            offering_link = sec_data.get('active_offering_link', ' - ')
             
             if offering_date_str and str(offering_date_str).strip() not in ['', '-', ' - ']:
+                # CREAZIONE LINK IPERTESTUALE COORDINATO AL COLORE DEL TEMA GRAFICO
+                link_html = f'<a href="{offering_link}" style="text-decoration: none; color: var(--sec-link-color); font-weight: bold;" target="_blank">Form {form_type}</a>'
+                
                 try:
                     off_date_dt = pd.to_datetime(offering_date_str).date()
                     if 'gaps' in globals() and isinstance(gaps, pd.DataFrame) and not gaps.empty:
@@ -1843,8 +1852,8 @@ with col3:
                         gaps_after_30 = gaps_df[(gaps_df['Gap %'] >= 30.0) & (gaps_df['Date_dt'] > off_date_dt)]
                         
                         if gaps_after_30.empty:
-                            # Scenario 1 (3 righe simmetriche, con accapo e punti)
-                            offering_msg = f"Form {form_type} depositato il {offering_date_str}<br>Successivamente al deposito - Nessuna giornata in gap ≥ 30% con Volume.<br>Pressione di vendita possibile."
+                            # Scenario 1 (Usa il link_html invece di testo piatto)
+                            offering_msg = f"{link_html} depositato il {offering_date_str}<br>Successivamente al deposito - Nessuna giornata in gap ≥ 30% con Volume.<br>Pressione di vendita possibile."
                         else:
                             red_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'RED']
                             green_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'GREEN']
@@ -1853,15 +1862,15 @@ with col3:
                             n_green = len(green_gaps)
                             
                             if n_red > 0:
-                                # Scenario 3 (3 righe simmetriche, con accapo e punti)
-                                offering_msg = f"Form {form_type} depositato il {offering_date_str}<br>Successivamente al deposito - Registrate {n_red} giornate in gap ≥ 30% con Volume e chiusura RED.<br>Offering parzialmente o interamente scaricata."
+                                # Scenario 3 (Usa il link_html invece di testo piatto)
+                                offering_msg = f"{link_html} depositato il {offering_date_str}<br>Successivamente al deposito - Registrate {n_red} giornate in gap ≥ 30% con Volume e chiusura RED.<br>Offering parzialmente o interamente scaricata."
                             else:
-                                # Scenario 2 (3 righe simmetriche, con accapo e punti)
-                                offering_msg = f"Form {form_type} depositato il {offering_date_str}<br>Successivamente al deposito - Registrate {n_green} giornate in gap ≥ 30% con Volume e chiusura GREEN.<br>Offering potenzialmente ancora pendente."
+                                # Scenario 2 (Usa il link_html invece di testo piatto)
+                                offering_msg = f"{link_html} depositato il {offering_date_str}<br>Successivamente al deposito - Registrate {n_green} giornate in gap ≥ 30% con Volume e chiusura GREEN.<br>Offering potenzialmente ancora pendente."
                     else:
-                        offering_msg = f"Form {form_type} depositato il {offering_date_str}<br>Successivamente al deposito - Nessuna giornata in gap ≥ 30% con Volume.<br>Pressione di vendita possibile."
+                        offering_msg = f"{link_html} depositato il {offering_date_str}<br>Successivamente al deposito - Nessuna giornata in gap ≥ 30% con Volume.<br>Pressione di vendita possibile."
                 except Exception as e:
-                    offering_msg = f"Form {form_type} depositato il {offering_date_str}."
+                    offering_msg = f"{link_html} depositato il {offering_date_str}."
 
             # Determinazione dei colori delle card in base alle soglie di solvibilità
             runway_val_str = sec_data.get('runway_months', ' - ')
