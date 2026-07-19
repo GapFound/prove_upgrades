@@ -75,6 +75,11 @@ def get_ocf_burn(us_gaap, cash_val):
         'NetCashFlowsFromUsedInOperatingActivities'
     ]
     ocf_val, ocf_form, ocf_units = get_latest_fact(us_gaap, ocf_tags)
+    
+    # Se il flusso di cassa operativo è positivo (generazione di cassa), ritorniamo 0.0 (nessun burn)
+    if ocf_val is not None and ocf_val >= 0:
+        return 0.0
+        
     if ocf_val is not None and ocf_val < 0:
         # Trova l'ultima voce per calcolare i mesi di copertura reali dell'OCF (duration)
         latest_ocf = ocf_units[-1]
@@ -236,15 +241,22 @@ def fetch_sec_data(cik):
             ocf_burn = get_ocf_burn(us_gaap, cash_val)
             
             if ocf_burn is not None and cash_val is not None:
-                monthly_burn_val = ocf_burn
-                runway_val = cash_val / monthly_burn_val
-                runway_str = f"{runway_val:.2f} Mesi"
-                if runway_val < 3.0:
-                    risk_status = "RED"
-                elif runway_val < 12.0 and risk_status != "RED":
-                    risk_status = "YELLOW"
+                if ocf_burn == 0.0:
+                    # CASSA GENERATA DA OPERAZIONI (Vero Cash Flow Positivo)
+                    monthly_burn_val = None
+                    runway_str = "Cash Flow +"
+                    risk_status = "GREEN"
+                else:
+                    # OPERAZIONI IN PERDITA (Vero Burn Rate Operativo)
+                    monthly_burn_val = ocf_burn
+                    runway_val = cash_val / monthly_burn_val
+                    runway_str = f"{runway_val:.2f} Mesi"
+                    if runway_val < 3.0:
+                        risk_status = "RED"
+                    elif runway_val < 12.0 and risk_status != "RED":
+                        risk_status = "YELLOW"
             else:
-                # FALLBACK: Variazione temporale del saldo di cassa se l'OCF è assente o positivo
+                # FALLBACK: Variazione temporale del saldo di cassa se l'OCF è assente
                 if cash_units:
                     # Seleziona i report ufficiali per ridurre il rumore, altrimenti usa tutti i record disponibili
                     official_units = [u for u in cash_units if u.get('form') in ['10-Q', '10-K', '20-F']]
@@ -292,7 +304,7 @@ def fetch_sec_data(cik):
                                 elif runway_val < 12.0 and risk_status != "RED":
                                     risk_status = "YELLOW"
                             elif cash_change < 0:
-                                # SOLVENCY OVERRIDE: Se la liquidità è critica, non possiamo mostrare un finto Cash Flow Positivo
+                                # SOLVENCY OVERRIDE: Se la liquidità è critica e la cassa sale, mostriamo trattino neutro per incertezza sui finanziamenti
                                 is_insolvent = False
                                 if liq_val is not None and liq_val < 1.2:
                                     is_insolvent = True
@@ -301,7 +313,7 @@ def fetch_sec_data(cik):
                                     
                                 if is_insolvent:
                                     monthly_burn_val = None
-                                    runway_str = "Critico / Illiquido"
+                                    runway_str = " - "
                                     risk_status = "RED"
                                 else:
                                     monthly_burn_val = 0.0
@@ -341,8 +353,11 @@ def fetch_sec_data(cik):
             primary_docs = recent.get('primaryDocument', [])
             
             offering_forms = ["S-1", "S-3", "424B3", "424B4", "424B5", "424B7", "S-1/A", "S-3/A"]
+            magic_words = ["common stock", "common shares", "ordinary shares", "at-the-market", "at the market"]
+            debt_words = ["senior notes", "notes due", "debt securities", "senior debt", "underwritten notes"]
             found_offering = False
             links_count = 0
+            seen_filings = set() # SET DI DEDUPLICAZIONE PER I DEPOSITI CONSULTABILI
             
             # Cerchiamo offering e raccogliamo gli ultimi 3 link rilevanti dei depositi
             for i in range(len(forms)):
@@ -353,26 +368,53 @@ def fetch_sec_data(cik):
                 sec_link = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc_no}/{doc}"
                 
                 if form_type in ["10-K", "10-Q", "20-F", "S-1", "S-3", "424B3", "424B5"]:
-                    if links_count < 3:
-                        sec_links.append({
-                            'date': filing_date,
-                            'form': form_type,
-                            'link': sec_link
-                        })
-                        links_count += 1
+                    filing_id = (filing_date, form_type)
+                    if filing_id not in seen_filings:
+                        if links_count < 3:
+                            sec_links.append({
+                                'date': filing_date,
+                                'form': form_type,
+                                'link': sec_link
+                            })
+                            seen_filings.add(filing_id)
+                            links_count += 1
                         
                 if form_type in offering_forms and not found_offering:
                     # Controlliamo che l'offering sia recente (ultimi 6 mesi = 180 giorni)
                     try:
                         filing_dt = datetime.strptime(filing_date, "%Y-%m-%d").date()
                         if (datetime.now().date() - filing_dt).days <= 180:
-                            active_offering = f" Form {form_type} depositato il {filing_date}"
-                            active_offering_date = filing_date
-                            active_offering_form = form_type
-                            risk_status = "RED" # Scatta l'allerta rossa di diluizione attiva
-                            found_offering = True
-                    except:
-                        pass
+                            # SCRAPER INTERNO CHIRURGICO: Scarichiamo solo la copertina (primi 40KB) tramite HTTP Range Request per massima efficienza
+                            range_headers = {
+                                'User-Agent': 'Luca Loiacono lucaloia@gmail.com',
+                                'Range': 'bytes=0-40000'
+                            }
+                            doc_res = requests.get(sec_link, headers=range_headers, timeout=5)
+                            is_equity = False
+                            
+                            if doc_res.status_code in [200, 206]:
+                                doc_text = doc_res.text.lower()
+                                # Verifichiamo la presenza dei termini azionari e di debito
+                                has_equity = any(word in doc_text for word in magic_words)
+                                has_debt = any(word in doc_text for word in debt_words)
+                                
+                                # LOGICA DI LUCA: Se trovi entrambi, scarti (obbligazioni/debito). Se trovi solo equity, tieni (diluizione reale)
+                                if has_equity and not has_debt:
+                                    is_equity = True
+                                else:
+                                    is_equity = False
+                            else:
+                                # Fallback prudenziale di sicurezza in caso di errore della richiesta parziale
+                                is_equity = True
+                                
+                            if is_equity:
+                                active_offering = f" Form {form_type} depositato il {filing_date}"
+                                active_offering_date = filing_date
+                                active_offering_form = form_type
+                                risk_status = "RED" # Scatta l'allerta rossa di diluizione attiva
+                                found_offering = True
+                    except Exception as e:
+                        print("Errore nel parsing del testo parziale del documento SEC:", e)
                     
         return {
             'cash_on_hand': format_millions(cash_val) if cash_val is not None else ' - ',
@@ -488,7 +530,7 @@ def fetch_polygon_profile(nome_ticker):
                 "JO": "Jordan", "JP": "Japan", "KE": "Kenya", "KG": "Kyrgyzstan", "KH": "Cambodia",
                 "KI": "Kiribati", "KM": "Comoros", "KN": "Saint Kitts and Nevis", "KP": "North Korea",
                 "KR": "South Korea", "KW": "Kuwait", "KY": "Cayman Islands", "KZ": "Kazakhstan",
-                "LA": "Laos", "LB": "Lebanon", "LC": "Saint Lucia", "LI": "Liechtenstein", "LK": "Sri Lanka",
+                "LA": "Laos", "LB": "Lebanon", "LC": "Saint Lucia", "LI": "Lichtenstein", "LK": "Sri Lanka",
                 "LR": "Liberia", "LS": "Lesotho", "LT": "Lithuania", "LU": "Luxembourg", "LV": "Latvia",
                 "LY": "Libya", "MA": "Morocco", "MC": "Monaco", "MD": "Moldova", "ME": "Montenegro",
                 "MF": "Saint Martin", "MG": "Madagascar", "MH": "Marshall Islands", "MK": "North Macedonia",
@@ -504,7 +546,7 @@ def fetch_polygon_profile(nome_ticker):
                 "RS": "Serbia", "RU": "Russia", "RW": "Rwanda", "SA": "Saudi Arabia", "SB": "Solomon Islands",
                 "SC": "Seychelles", "SD": "Sudan", "SE": "Sweden", "SG": "Singapore", "SH": "Saint Helena",
                 "SI": "Slovenia", "SJ": "Svalbard and Jan Mayen", "SK": "Slovakia", "SL": "Sierra Leone",
-                "SM": "San Marino", "SN": "Senegal", "SO": "Somalia", "SR": "Suriname", "SS": "South Sudan",
+                "SM": "San Marino", "SN": "Senegal", "SO": "Supporters", "SR": "Suriname", "SS": "South Sudan",
                 "ST": "São Tomé and Príncipe", "SV": "El Salvador", "SX": "Sint Maarten", "SY": "Syria",
                 "SZ": "Eswatini", "TC": "Turks and Caicos Islands", "TD": "Chad", "TF": "French Southern Territories",
                 "TG": "Togo", "TH": "Thailand", "TJ": "Tajikistan", "TK": "Tokelau", "TL": "Timor-Leste",
@@ -546,7 +588,9 @@ def render_table_with_slider(
     padding_px: int = 14,
     key: str = "tbl",
     escape: bool = True,
-    reset_index: bool = True
+    reset_index: bool = True,
+    font_px: float = 11.5,
+    width_pct: int = 95
 ):
     try:
         if reset_index:
@@ -565,10 +609,16 @@ def render_table_with_slider(
     scroller_h = header_px + row_px * target_rows + padding_px
     component_h = scroller_h + 36
 
+    # ALLINEAMENTO DIFFERENZIATO: Centrato per i gappers (col2), allineato rigorosamente a sinistra per i fondamentali (col1)
+    margin_style = "margin: 0 auto;" if key == "gaps" else "margin-left: 0; margin-right: auto;"
+    
+    # RIMOZIONE DI SICUREZZA DI MAX-WIDTH PER I FONDAMENTALI PER EVITARE CHE LE CELLE SI COMPRIMANO (SQUEEZINO) CON DATI CORPOSI
+    max_width_style = "max-width: calc(100% - 4px);" if key == "gaps" else "max-width: none !important;"
+
     html = f"""
     <div id="gf-wrap-{key}" style="
       position:relative; z-index:2147483000;
-      width:95%; max-width:95%; margin-right: auto; margin-left: 0;
+      width:{width_pct}%; max-width:{width_pct}%; {margin_style}
       box-sizing:border-box; overflow:visible;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
 
@@ -591,12 +641,18 @@ def render_table_with_slider(
     </div>
 
     <style>
+      /* ANNULLAMENTO MARGINI DI DEFAULT DEL BROWSER NELL'IFRAME PER ALLINEAMENTO MILLIMETRICO */
+      body {{
+        margin: 0 !important;
+        padding: 0 !important;
+      }}
+
       /* MODALITA' CHIARO (Default originaria) */
       #gf-wrap-{key} table {{
         border-collapse: separate; border-spacing:0;
         width: max-content;
-        max-width: calc(100% - 4px);
-        font-size:11.5px;
+        {max_width_style}
+        font-size:{font_px}px;
         color: #111;
         background: #ffffff;
       }}
@@ -611,6 +667,7 @@ def render_table_with_slider(
         position: sticky; top: 0;
         background:#fafafa; z-index:1;
         color: #111;
+        text-align: center !important; /* FORZATA LA CENTRATURA DI TUTTE LE INTESTAZIONI COLONNA */
       }}
       #gf-wrap-{key} thead th:first-child,
       #gf-wrap-{key} tbody td:first-child {{
@@ -656,6 +713,46 @@ def render_table_with_slider(
         #gf-wrap-{key} tbody td:first-child {{
           color: #cccccc;
         }}
+      }}
+
+      /* AGGIUNTA DEL COSTRUTTO DEL TOOLTIP DENTRO L'IFRAME CON GRAFFE DOPPIE PER EVITARE NAMEERROR DI PYTHON */
+      .gf-tooltip {{
+        position: relative;
+        display: inline-block;
+        cursor: help;
+      }}
+      .gf-tooltip .gf-tooltiptext {{
+        visibility: hidden;
+        width: 140px;
+        background-color: #212121;
+        color: #ffffff;
+        text-align: center;
+        border-radius: 4px;
+        padding: 6px;
+        position: absolute;
+        z-index: 2147483647;
+        bottom: 130%;
+        left: 50%;
+        transform: translateX(-50%);
+        opacity: 0;
+        font-size: 11px;
+        font-weight: normal;
+        font-family: system-ui, -apple-system, sans-serif;
+        line-height: 1.3;
+        pointer-events: none;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        border: 1px solid #444;
+        transition: opacity 0.1s;
+      }}
+      .gf-tooltip .gf-tooltiptext.gf-tooltip-down {{
+        bottom: auto;
+        top: 130%;
+        left: 0;
+        transform: none;
+      }}
+      .gf-tooltip:hover .gf-tooltiptext {{
+        visibility: visible;
+        opacity: 1;
       }}
     </style>
 
@@ -716,6 +813,12 @@ def render_table_with_slider(
       setTimeout(syncSliderFromScroll, 120);
     </script>
     """
+    
+    # SOSTITUZIONE CHIRURGICA DELLA TESTA DEL RETTANGOLO IN ALTO A SINISTRA CON IL PUNTO INTERROGATIVO PICCOLO NERO CERCHIATO COERENTE A QUELLI DI DESTRA
+    if key == "fond":
+        corner_html = '<th style="cursor:help; text-align:center; vertical-align:middle;"><span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui;">?<span class="gf-tooltiptext gf-tooltip-down">Sa = StockAnalysis<br>Yf = YahooFinance</span></span></th>'
+        html = html.replace('<th></th>', corner_html, 1)
+
     components.html(html, height=component_h, scrolling=False)
 
 #%%
@@ -1267,7 +1370,7 @@ st.set_page_config(
     layout="wide",  
 ) 
 
-# MOTORE REATTIVO CSS (Imposta le variabili in base al tema scuro o chiaro rilevato)
+# MOTORE REATTIVO CSS (Imposta le variabili in base al tema scuro o chiaro rilevato, con Tooltip istantaneo)
 st.markdown("""
     <style>
       :root {
@@ -1290,11 +1393,52 @@ st.markdown("""
           --sec-link-color: #ff4b4b;
         }
       }
+
+      /* STILE DEL TOOLTIP ISTANTANEO IN PURO CSS */
+      .gf-tooltip {
+        position: relative;
+        display: inline-block;
+        cursor: help;
+      }
+      .gf-tooltip .gf-tooltiptext {
+        visibility: hidden;
+        width: 160px;
+        background-color: #212121;
+        color: #ffffff;
+        text-align: center;
+        border-radius: 4px;
+        padding: 6px;
+        position: absolute;
+        z-index: 2147483647;
+        bottom: 130%; /* mostrato sopra di default */
+        left: 50%;
+        transform: translateX(-50%);
+        opacity: 0;
+        font-size: 11px;
+        font-weight: normal;
+        font-family: system-ui, -apple-system, sans-serif;
+        line-height: 1.3;
+        pointer-events: none;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        border: 1px solid #444;
+        transition: opacity 0.1s;
+      }
+      /* Posizionamento specifico verso il basso per l'angolo a sinistra */
+      .gf-tooltip .gf-tooltiptext.gf-tooltip-down {
+        bottom: auto;
+        top: 130%;
+        left: 0;
+        transform: none;
+      }
+      .gf-tooltip:hover .gf-tooltiptext {
+        visibility: visible;
+        opacity: 1;
+      }
     </style>
 """, unsafe_allow_html=True)
 
-# PROPORZIONI AGGIORNATE: RESTRINTA ULTERIORMENTE LA COLONNA 3 AL 35% PER GARANTIRE SEPARAZIONE E DISTANZA DA COLONNA 2
-col1, col2, col3 = st.columns([0.11, 0.54, 0.35])   
+# PROPORZIONI RIPRISTINATE: COLONNA 1 AL PESO ORIGINALE DI 0.11, COLONNA 2 AL 49% E COLONNA 3 AL 40% PER MASSIMA OMOGENEITA' VISIVA
+col1, col2, col3 = st.columns([0.11, 0.49, 0.40])   
     
 # INSERISCO il TICKER
 global nome_ticker
@@ -1449,18 +1593,21 @@ with col1:
             else:
                 ticker_html = f"{nome_ticker.upper()}"
 
-            # ST.MARKDOWN BLINDATO: Stringhe piatte concatenate (senza andare a capo) per impedire a Streamlit di creare box grigi e consentire nuove schede
+            # ST.MARKDOWN BLINDATO: Stringhe piatte concatenate (senza andare a capo) per impedire a Streamlit di creare box grigi e consentire nuove schede (ridotto il carattere a 12px per settore e industria)
             ticker_info_html = (
                 f'<div style="font-size: 22px; font-weight: bold; margin-bottom: 0px; line-height: 1.1;">{ticker_html}</div>'
                 f'<div style="font-size: 13.5px; font-weight: bold; color: #d00; margin-bottom: 8px;">{st.session_state.get("nationality_exchange", {}).get("nation_full", " - ")}</div>'
                 f'<div style="font-size: 12px; margin-bottom: 5px;"><b>{st.session_state.get("nationality_exchange", {}).get("nation", " - ")} - {st.session_state.get("nationality_exchange", {}).get("exchange", " - ")}</b></div>'
-                f'<div style="font-size: 13px; font-weight: normal; color: #444;">{st.session_state.get("sector_industry", {}).get("sector", " - ")}</div>'
-                f'<div style="font-size: 13px; font-weight: normal; color: #444;">{st.session_state.get("sector_industry", {}).get("industry", " - ")}</div>'
+                f'<div style="font-size: 12px; font-weight: normal; color: #444;">{st.session_state.get("sector_industry", {}).get("sector", " - ")}</div>'
+                f'<div style="font-size: 12px; font-weight: normal; color: #444;">{st.session_state.get("sector_industry", {}).get("industry", " - ")}</div>'
             )
             st.markdown(ticker_info_html, unsafe_allow_html=True)
 
-            # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 1 DEI FONDAMENTALI (reset_index=False per mantenere M.Cap, Outstand, ecc.)
-            render_table_with_slider(st.session_state['fondamentali'], key="fond", reset_index=False, min_rows=6, max_rows=6)
+            # COPIA DEL DATAFRAME PER INIETTARE L'HTML DEL PUNTO INTERROGATIVO CON TOOLTIP NELLA CELLA IN ALTO A SINISTRA (escape=False)
+            fond_df_copy = st.session_state['fondamentali'].copy()
+
+            # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 1 DEI FONDAMENTALI (reset_index=False per mantenere M.Cap, Outstand, ecc. e font_px=10.0 per massima leggibilita' ed ingombro al 100% della colonna stretta 0.11)
+            render_table_with_slider(fond_df_copy, key="fond", reset_index=False, font_px=10.0, min_rows=6, max_rows=6, width_pct=100, escape=False)
             print(st.session_state['fondamentali'])
                    
             if not st.session_state['dati_split'].empty:
@@ -1522,8 +1669,8 @@ with col2:
            st.write(""); st.write("")
            
            if not v_gaps.empty:
-               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 2 DEI GAPPERS (reset_index=True)
-               render_table_with_slider(v_gaps, key="gaps", reset_index=True)
+               # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 2 DEI GAPPERS (reset_index=True, ingombro riallineato stabilmente al 95% per simmetria perfetta)
+               render_table_with_slider(v_gaps, key="gaps", reset_index=True, font_px=11.5, width_pct=95)
                
                # CALCOLO E VISUALIZZAZIONE DELLE STATISTICHE DI CHIUSURA RED/GREEN DEI GAPPER FILTRATI (CON CONTEGGIO MINIMALISTA IN REGULAR)
                total_gaps = len(v_gaps)
@@ -1573,28 +1720,18 @@ with col2:
            with col2_5: 
                    st.write(""); st.write(""); st.write(""); st.write(""); st.write("")
                    st.html(f"""
-                       <div style="text-align:center; font-size: 14px;">
-                           <b>news:</b> <br/> <br/>
+                       <div style="text-align:center; font-size: 14px; color: var(--text-news); font-family: system-ui,-apple-system;">
+                           <b>ultime news:</b> <br/> <br/>
                        </div>
                    """)
                                    
                    if isinstance(st.session_state['news'], pd.DataFrame):
                            # ACCUMULATORE PER EVITARE GLI SPAZI VERTICALI NELLE NEWS (STRINGHE PIATTE SENZA ANDARE A CAPO)
                            news_html = ""
-                           for a, b in st.session_state['news'].iterrows():
-                               ora = datetime.now().hour
-                               
-                               if ora <= 6:
-                                    formatted_date = b['Date'] - timedelta(days=1)
-                                    data_ora = datetime.now() - timedelta(days=1)
-                               else:
-                                    formatted_date = b['Date']
-                                    data_ora = datetime.now()
-                                    
-                               if formatted_date.date() != data_ora.date() and a > 0:
-                                    print(formatted_date, data_ora)
-                                    break     
-                                    
+                           # RIMOZIONE DEL FILTRO DATA: RECUPERA SEMPRE LE ULTIME 5 NEWS IN ORDINE CRONOLOGICO
+                           latest_news = st.session_state['news'].head(5)
+                           for a, b in latest_news.iterrows():
+                               formatted_date = b['Date']
                                data_da_stampa = formatted_date.strftime("%Y-%m-%d | h %H:%M")    
                         
                                link = b['Link']
@@ -1634,7 +1771,7 @@ with col3:
             form_type = sec_data.get('active_offering_form', ' - ')
                 
             short_edge = "UNKNOWN"
-            edge_msg = "Analisi basata sulla runway trimestrale dei dati SEC e sul monitoraggio delle registrazioni di offering pendenti."
+            edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi."
             
             # Se mancano del tutto i dati SEC, rimane grigio spento
             if sec_data.get('cash_on_hand') == ' - ':
@@ -1655,7 +1792,7 @@ with col3:
                             
                             if gaps_after_30.empty:
                                 # Scenario 1: Nessun gap post-deposito
-                                edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% registrata successiva al deposito.<br>Pressione di vendita imminente (ATM/Shelf intatto)."
+                                edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% con Volume registrata successivamente al deposito.<br>Pressione di vendita possibile (ATM/Shelf intatto)."
                             else:
                                 red_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'RED']
                                 green_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'GREEN']
@@ -1665,19 +1802,19 @@ with col3:
                                 
                                 if n_red > 0:
                                     # Scenario 3: Almeno una chiusura RED post-deposito
-                                    edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Registrate {n_red} giornate in gap ≥ 30% con chiusura RED successive al deposito.<br>Diluizione completata (ATM/Shelf parzialmente o interamente scaricato)."
+                                    edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Registrate {n_red} giornate in gap ≥ 30% con Volume e chiusura RED successivamente al deposito.<br>Diluizione completata (ATM/Shelf parzialmente o interamente scaricato)."
                                 else:
                                     # Scenario 2: Gap successivi ma tutti GREEN post-deposito
-                                    edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Registrate {n_green} giornate in gap ≥ 30% con chiusura GREEN successive al deposito.<br>Offering ancora pendente (cassa non ancora interamente scaricata)."
+                                    edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Registrate {n_green} giornate in gap ≥ 30% con Volume e chiusura GREEN successivamente al deposito.<br>Offering ancora pendente (cassa non ancora interamente scaricata)."
                         else:
                             # Se non ci sono gap rilevati in colonna 2, ricadiamo nello Scenario 1 (ATM intatto)
-                            edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% registrata successiva al deposito.<br>Pressione di vendita imminente (ATM/Shelf intatto)."
+                            edge_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% con Volume registrata successivamente al deposito.<br>Pressione di vendita possibile (ATM/Shelf intatto)."
                     except Exception as e:
                         edge_msg = f"Form {form_type} depositato il {offering_date_str}."
                 else:
                     # Se non ci sono registrazioni di offering recenti negli ultimi 6 mesi, usiamo la Runway per definire l'opportunità
                     raw_runway = sec_data.get('runway_months', ' - ')
-                    if "Cash Flow" in raw_runway or "+" in raw_runway:
+                    if "Cash Flow" in raw_runway or "Positive" in raw_runway or "+" in raw_runway:
                         edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi.<br>Trend finanziario solido (flusso di cassa positivo)."
                     elif "Critico" in raw_runway or "Illiquido" in raw_runway:
                         edge_msg = "Nessuna offering recente rilevata negli ultimi 6 mesi.<br>Solvibilità critica o cassa illiquida (rischio diluizione imminente)."
@@ -1744,6 +1881,13 @@ with col3:
             curr_assets_ratio_val = sec_data.get('current_assets_ratio', ' - ')
             liquidity_test_val = sec_data.get('liquidity_test', ' - ')
 
+            # DEFINIZIONE DELLE SCRIBILI DEI TOOLTIP IN COCKPIT CON PUNTO INTERROGATIVO PICCOLO NERO CERCHIATO (CORPO 7.5PX) SENZA LATENZA DI ATTESA
+            coh_tooltip = 'Cash on Hand <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Ultima cassa liquida disponibile dichiarata nel report SEC.</span></span>'
+            mb_tooltip = 'Monthly Burn <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Velocità media di bruciatura mensile delle riserve liquide tra gli ultimi due trimestri.</span></span>'
+            rc_tooltip = 'Runway Cassa <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Autonomia di cassa in mesi prima del completo esaurimento delle riserve.</span></span>'
+            car_tooltip = 'Cash / Current Assets % <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Indica quanta parte delle attività correnti dichiarate è composta da cassa liquida reale.</span></span>'
+            ltr_tooltip = 'Liquidity Test Ratio <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Cassa liquida divisa per le passività correnti (debiti entro l\'anno). Sotto 1.2 indica alto rischio di insolvenza immediata e diluizione forzata.</span></span>'
+
             # 1. AUTONOMIA DI CASSA (CASH RUNWAY) IN CIMA AL COCKPIT (Sfondi dinamici neri `#000000` in Dark Mode tramite variabili CSS)
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-bottom: 10px;'>📊 AUTONOMIA DI CASSA (CASH RUNWAY)</div>", unsafe_allow_html=True)
             
@@ -1751,15 +1895,15 @@ with col3:
             metrics_top_html = f"""
             <div style="display: flex; gap: 10px; margin-bottom: 15px; font-family: system-ui,-apple-system; box-sizing: border-box;">
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Ultima cassa liquida disponibile dichiarata nel report SEC.">Cash on Hand ℹ️</div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">{coh_tooltip}</div>
                     <div style="font-size: 18px; font-weight: bold; color: var(--text-news);">{cash_on_hand_val}</div>
                 </div>
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Velocità media di bruciatura mensile delle riserve liquide tra gli ultimi due trimestri.">Monthly Burn ℹ️</div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">{mb_tooltip}</div>
                     <div style="font-size: 18px; font-weight: bold; color: var(--text-news);">{monthly_burn_val_str}</div>
                 </div>
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Autonomia di cassa in mesi prima del completo esaurimento delle riserve (Sotto i 3 mesi: Rosso, Sotto i 12 mesi: Arancione, Sopra i 12: Verde).">Runway Cassa ℹ️</div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">{rc_tooltip}</div>
                     <div style="font-size: 18px; font-weight: bold; color: {runway_color};">{runway_val_str}</div>
                 </div>
             </div>
@@ -1770,11 +1914,11 @@ with col3:
             metrics_bottom_html = f"""
             <div style="display: flex; gap: 10px; margin-bottom: 20px; font-family: system-ui,-apple-system; box-sizing: border-box;">
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Indica quanta parte delle attività correnti dichiarate è composta da cassa liquida reale. Sotto il 20%: Rosso (attività illiquide).">Cash / Current Assets % ℹ️</div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">{car_tooltip}</div>
                     <div style="font-size: 18px; font-weight: bold; color: {ratio_color};">{curr_assets_ratio_val}</div>
                 </div>
                 <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;" title="Cassa liquida divisa per le passività correnti (debiti entro l'anno). Sotto 1.2 indica alto rischio di insolvenza immediata e diluizione forzata (Rosso).">Liquidity Test Ratio ℹ️</div>
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">{ltr_tooltip}</div>
                     <div style="font-size: 18px; font-weight: bold; color: {liq_color};">{liquidity_test_val}</div>
                 </div>
             </div>
@@ -1790,8 +1934,8 @@ with col3:
             """
             st.markdown(risk_badge_html, unsafe_allow_html=True)
             
-            # 3. Tabella degli ultimi link ai depositi SEC (I link sono applicati direttamente sul nome del modulo con colore var(--sec-link-color))
-            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 25px; margin-bottom: 8px;'>📂 ULTIMI DEPOSITI SEC EDGAR RILEVANTI</div>", unsafe_allow_html=True)
+            # 3. Tabella degli ultimi link ai depositi SEC (I link sono applicati direttamente sul nome del modulo con colore var(--sec-link-color). Rimossa dicitura EDGAR)
+            st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-top: 25px; margin-bottom: 8px;'>📂 ULTIMI DEPOSITI SEC RILEVANTI</div>", unsafe_allow_html=True)
             sec_links = sec_data.get('sec_links', [])
             if sec_links:
                 sec_html = ""
