@@ -105,7 +105,7 @@ def format_sa_numeric_value(val_str):
     if val_str.endswith(('M', 'B', 'K', '%')):
         return val_str
     try:
-        # Rimuove le virgole per permettere il corretto parsing como float
+        # Rimuove le virgole per permettere il corretto parsing come float
         cleaned = val_str.replace(',', '')
         num = float(cleaned)
         if num >= 10**9:
@@ -174,7 +174,7 @@ def fetch_sec_data(cik):
         'current_assets_ratio': ' - ',
         'liquidity_test': ' - ',
         'risk_status': 'UNKNOWN',
-        'active_offering': 'Nessuna offering registrata di recente',
+        'active_offering': 'Nessun deposito SEC recente per potenziale emissione di azioni (S-1, S-3, 424B) negli ultimi 180 giorni.',
         'active_offering_date': ' - ',
         'active_offering_form': ' - ',
         'sec_links': []
@@ -338,7 +338,7 @@ def fetch_sec_data(cik):
         sub_url = f"https://data.sec.gov/submissions/CIK{cik_str}.json"
         sub_res = requests.get(sub_url, headers=headers)
         
-        active_offering = "Nessuna offering pendente registrata di recente"
+        active_offering = "Nessun deposito SEC recente per potenziale emissione di azioni (S-1, S-3, 424B) negli ultimi 180 giorni."
         active_offering_date = " - "
         active_offering_form = " - "
         sec_links = []
@@ -398,12 +398,12 @@ def fetch_sec_data(cik):
                                 has_equity = any(word in doc_text for word in magic_words)
                                 has_debt = any(word in doc_text for word in debt_words)
                                 
-                                # NUOVA LOGICA REVISIONATA CON DISTINZIONE REGISTRAZIONE VS SUPPLEMENTO
+                                # NUOVA LOGICA CON DISTINZIONE TRA REGISTRAZIONI PRIMARIE E SUPPLEMENTI
                                 if form_type in ["S-1", "S-3", "S-1/A", "S-3/A"]:
                                     if has_equity:
                                         is_equity = True
                                 else:
-                                    # Per moduli supplementari (424B ecc.) manteniamo esclusione rigorosa
+                                    # Per i moduli supplementari 424B applichiamo l'esclusione restrittiva dei bond
                                     if has_equity and not has_debt:
                                         is_equity = True
                             else:
@@ -816,9 +816,9 @@ def render_table_with_slider(
     </script>
     """
     
-    # SOSTITUZIONE CHIRURGICA DELLA TESTA DEL RETTANGOLO IN ALTO A SINISTRA CON IL PUNTO INTERROGATIVO PICCOLO NERO CERCHIATO COERENTE A QUELLI DI DESTRA
+    # RISOLUZIONE BUG DI IMPILAMENTO Z-INDEX: Forziamo la cella d'angolo <th> ad avere z-index: 10 !important per sovrastare permanentemente le celle adiacenti
     if key == "fond":
-        corner_html = '<th style="cursor:help; text-align:center; vertical-align:middle;"><span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui;">?<span class="gf-tooltiptext gf-tooltip-down">Sa = StockAnalysis<br>Yf = YahooFinance</span></span></th>'
+        corner_html = '<th style="cursor:help; text-align:center; vertical-align:middle; position:sticky; top:0; z-index:10 !important;"><span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui;">?<span class="gf-tooltiptext gf-tooltip-down">Sa = StockAnalysis<br>Yf = YahooFinance</span></span></th>'
         html = html.replace('<th></th>', corner_html, 1)
 
     components.html(html, height=component_h, scrolling=False)
@@ -1595,13 +1595,13 @@ with col1:
             else:
                 ticker_html = f"{nome_ticker.upper()}"
 
-            # MODIFICA APPORTATA: Aggiunto margin-bottom: 15px all'ultima riga del settore/industria per distanziarla elegantemente dalla tabella sottostante
+            # MODIFICA APPORTATA: Distanziamento impostato a 10px precisi per l'industria per separarla armoniosamente dalla tabella
             ticker_info_html = (
                 f'<div style="font-size: 22px; font-weight: bold; margin-bottom: 0px; line-height: 1.1;">{ticker_html}</div>'
                 f'<div style="font-size: 13.5px; font-weight: bold; color: #d00; margin-bottom: 8px;">{st.session_state.get("nationality_exchange", {}).get("nation_full", " - ")}</div>'
                 f'<div style="font-size: 12px; margin-bottom: 5px;"><b>{st.session_state.get("nationality_exchange", {}).get("nation", " - ")} - {st.session_state.get("nationality_exchange", {}).get("exchange", " - ")}</b></div>'
                 f'<div style="font-size: 12px; font-weight: normal; color: #444;">{st.session_state.get("sector_industry", {}).get("sector", " - ")}</div>'
-                f'<div style="font-size: 12px; font-weight: normal; color: #444; margin-bottom: 15px;">{st.session_state.get("sector_industry", {}).get("industry", " - ")}</div>'
+                f'<div style="font-size: 12px; font-weight: normal; color: #444; margin-bottom: 10px;">{st.session_state.get("sector_industry", {}).get("industry", " - ")}</div>'
             )
             st.markdown(ticker_info_html, unsafe_allow_html=True)
 
@@ -1753,11 +1753,11 @@ with col2:
 
 with col3:
     # ---------------------------------------------------------------------------------
-    # LA PARTE DESTRA (COL3) DIVENTA ORA IL COCKPIT GRAFICO DI ANALISI DILUIZIONE & RISK SEC (FORMATTAZIONE OTTIMIZZATA DI LUCA)
+    # LA PARTE DESTRA (COL3) DIVENTATA IL COCKPIT GRAFICO DI ANALISI DILUIZIONE & RISK SEC
     # ---------------------------------------------------------------------------------
     if 'dati_storici' in st.session_state and st.session_state['dati_storici'] is not None:
         
-        # SPACER VERTICALE DIMEZZATO ESATTAMENTE A 95PX PER ALLINEARE IL COCKPIT ALL'ALTEZZA IDEALE DELLA TABELLA DI COLONNA 2
+        # SPACER VERTICALE ALLINEATO A 95PX PER ALLINEARE IL COCKPIT ALL'ALTEZZA DELLA TABELLA DI COLONNA 2
         st.markdown("<div style='height: 95px;'></div>", unsafe_allow_html=True)
         
         cached_profile = st.session_state.get('cached_profile', None)
@@ -1769,41 +1769,60 @@ with col3:
         sec_data = fetch_sec_data(cik)
             
         if isinstance(sec_data, dict):
-            # 1. VALUTAZIONE E SCRITTURA DELLA SEZIONE CASSA / SOLVIBILITÀ (PIANO INDIPENDENTE)
-            cash_msg = "Dati di cassa insufficienti o non disponibili."
+            # 1. VALUTAZIONE E SCRITTURA DELLA SEZIONE CASSA / SOLVIBILITÀ (PIANO COMPLETAMENTE INDIPENDENTE)
+            cash_msg = "Dati di cassa insufficienti o non disponibili"
+            cash_color = "var(--text-news)" # Default Nero reattivo
+            
             raw_runway = sec_data.get('runway_months', ' - ')
             liq_val_str = sec_data.get('liquidity_test', ' - ')
             ratio_val_str = sec_data.get('current_assets_ratio', ' - ')
             
-            is_insolvent = False
+            is_insolvent_ltr = False
+            is_insolvent_assets = False
             try:
                 l_val = float(liq_val_str)
                 if l_val < 1.2:
-                    is_insolvent = True
+                    is_insolvent_ltr = True
             except:
                 pass
             try:
                 rt_val = float(ratio_val_str.replace('%', ''))
                 if rt_val < 20.0:
-                    is_insolvent = True
+                    is_insolvent_assets = True
             except:
                 pass
-                
-            if "Critico" in raw_runway or "Illiquido" in raw_runway or is_insolvent:
-                cash_msg = "Solvibilità critica (rischio diluizione imminente)."
-            elif "Cash Flow" in raw_runway or "Positive" in raw_runway or "+" in raw_runway:
-                cash_msg = "Trend finanziario solido (flusso di cassa positivo)."
+
+            # GERARCHIA DELLE VALUTAZIONI (IL CASO APPLE/BLUE CHIP È RISOLTO CON PRIORITÀ ASSOLUTA)
+            if "Cash Flow" in raw_runway or "Positive" in raw_runway or "+" in raw_runway:
+                cash_msg = "Trend finanziario solido - flusso di cassa operativo OCF positivo"
+                cash_color = "#2e7d32" # Verde
+            elif "Critico" in raw_runway or "Illiquido" in raw_runway:
+                cash_msg = "Solvibilità critica - LTR < 1.2 - rischio diluizione"
+                cash_color = "#c62828" # Rosso
+            elif is_insolvent_ltr or is_insolvent_assets:
+                # Gestione splittata delle due allerte di solvibilità
+                if is_insolvent_ltr and is_insolvent_assets:
+                    cash_msg = "Solvibilità critica - LTR < 1.2 - rischio diluizione<br>Solvibilità critica - Cash / Current Assets < 20% - rischio diluizione"
+                elif is_insolvent_ltr:
+                    cash_msg = "Solvibilità critica - LTR < 1.2 - rischio diluizione"
+                else:
+                    cash_msg = "Solvibilità critica - Cash / Current Assets < 20% - rischio diluizione"
+                cash_color = "#c62828" # Rosso
             else:
                 try:
                     r_val = float(raw_runway.split()[0])
                     if r_val < 3.0:
-                        cash_msg = "Autonomia di cassa critica (inferiore a 3 mesi)."
+                        cash_msg = "Autonomia di cassa critica - inferiore a 3 mesi"
+                        cash_color = "#c62828" # Rosso
                     elif r_val < 12.0:
-                        cash_msg = "Autonomia di cassa limitata (inferiore a 12 mesi)."
+                        cash_msg = "Autonomia di cassa limitata - inferiore a 12 mesi"
+                        cash_color = "#f57f17" # Arancione
                     else:
-                        cash_msg = "Autonomia di cassa stabile (superiore a 12 mesi)."
+                        cash_msg = "Autonomia di cassa stabile - superiore a 12 mesi"
+                        cash_color = "#2e7d32" # Verde
                 except:
-                    cash_msg = "Dati di cassa insufficienti o non disponibili."
+                    cash_msg = "Dati di cassa insufficienti o non disponibili"
+                    cash_color = "var(--text-news)"
 
             # 2. VALUTAZIONE E SCRITTURA DELLA SEZIONE OFFERING / DILUIZIONE
             offering_msg = "Nessun deposito SEC recente per potenziale emissione di azioni (S-1, S-3, 424B) negli ultimi 180 giorni."
@@ -1821,8 +1840,8 @@ with col3:
                         gaps_after_30 = gaps_df[(gaps_df['Gap %'] >= 30.0) & (gaps_df['Date_dt'] > off_date_dt)]
                         
                         if gaps_after_30.empty:
-                            # Scenario 1: Nessun gap post-deposito (ATM intatto)
-                            offering_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% con Volume registrata successivamente al deposito.<br>Pressione di vendita possibile (ATM/Shelf intatto)."
+                            # Scenario 1 (3 righe simmetriche, con accapo e punti)
+                            offering_msg = f"Form {form_type} depositato il {offering_date_str}<br>Successivamente al deposito - Nessuna giornata in gap ≥ 30% con Volume.<br>Pressione di vendita possibile."
                         else:
                             red_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'RED']
                             green_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'GREEN']
@@ -1831,33 +1850,33 @@ with col3:
                             n_green = len(green_gaps)
                             
                             if n_red > 0:
-                                # Scenario 3 (Femminile & Corretto): Almeno un gap RED registrato successivamente al deposito
-                                offering_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Registrate {n_red} giornate in gap ≥ 30% con Volume e chiusura RED successivamente al deposito.<br>ATM/Shelf parzialmente o interamente scaricata."
+                                # Scenario 3 (3 righe simmetriche, con accapo e punti)
+                                offering_msg = f"Form {form_type} depositato il {offering_date_str}<br>Successivamente al deposito - Registrate {n_red} giornate in gap ≥ 30% con Volume e chiusura RED.<br>Offering parzialmente o interamente scaricata."
                             else:
-                                # Scenario 2: Gap successivi ma tutti GREEN registrati post-deposito
-                                offering_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Registrate {n_green} giornate in gap ≥ 30% con Volume e chiusura GREEN successivamente al deposito.<br>Offering ancora pendente (cassa non ancora interamente scaricata)."
+                                # Scenario 2 (3 righe simmetriche, con accapo e punti)
+                                offering_msg = f"Form {form_type} depositato il {offering_date_str}<br>Successivamente al deposito - Registrate {n_green} giornate in gap ≥ 30% con Volume e chiusura GREEN.<br>Offering potenzialmente ancora pendente."
                     else:
-                        offering_msg = f"Form {form_type} depositato il {offering_date_str}.<br>Nessuna giornata in gap ≥ 30% con Volume registrata successivamente al deposito.<br>Pressione di vendita possibile (ATM/Shelf intatto)."
+                        offering_msg = f"Form {form_type} depositato il {offering_date_str}<br>Successivamente al deposito - Nessuna giornata in gap ≥ 30% con Volume.<br>Pressione di vendita possibile."
                 except Exception as e:
                     offering_msg = f"Form {form_type} depositato il {offering_date_str}."
 
-            # Determinazione dei colori per le metriche in base alle soglie personalizzate di Luca
+            # Determinazione dei colori delle card in base alle soglie di solvibilità
             runway_val_str = sec_data.get('runway_months', ' - ')
             runway_color = "#333"
             if "Cash Flow" in runway_val_str or "Positive" in runway_val_str or "+" in runway_val_str:
-                runway_color = "#2e7d32" # Verde brillante per Cash Flow Positivo
-                runway_val_str = "Cash Flow +" # Sostituita la stringa per evitare troncamenti grafici nelle card
+                runway_color = "#2e7d32"
+                runway_val_str = "Cash Flow +"
             elif "Critico" in runway_val_str or "Illiquido" in runway_val_str:
-                runway_color = "#c62828" # Rosso allerta per illiquidità strutturale
+                runway_color = "#c62828"
             else:
                 try:
                     r_val = float(runway_val_str.split()[0])
                     if r_val < 3.0:
-                        runway_color = "#c62828" # Rosso (Sotto i 3 mesi)
+                        runway_color = "#c62828"
                     elif r_val < 12.0:
-                        runway_color = "#f57f17" # Arancione (Tra 3 e 12 mesi)
+                        runway_color = "#f57f17"
                     else:
-                        runway_color = "#2e7d32" # Verde (Sopra i 12 mesi)
+                        runway_color = "#2e7d32"
                 except:
                     pass
                 
@@ -1866,11 +1885,11 @@ with col3:
             try:
                 l_val = float(liq_val_str)
                 if l_val < 1.2:
-                    liq_color = "#c62828" # Rosso (Sotto 1.2 - Allerta Insolvenza)
+                    liq_color = "#c62828"
                 elif l_val < 1.5:
-                    liq_color = "#f57f17" # Arancione (Tra 1.2 e 1.5)
+                    liq_color = "#f57f17"
                 else:
-                    liq_color = "#2e7d32" # Verde (Sopra 1.5 - Solvente)
+                    liq_color = "#2e7d32"
             except:
                 pass
                 
@@ -1879,26 +1898,26 @@ with col3:
             try:
                 rt_val = float(ratio_val_str.replace('%', ''))
                 if rt_val < 20.0:
-                    ratio_color = "#c62828" # Rosso (Cassa inferiore al 20% delle attività correnti)
+                    ratio_color = "#c62828"
                 else:
-                    ratio_color = "#2e7d32" # Verde
+                    ratio_color = "#2e7d32"
             except:
                 pass
 
-            # Estrazione variabili locali per evitare conflitti di apici annidati nelle espressioni delle f-string (compatibilità Python < 3.12)
+            # Estrazione variabili locali per evitare conflitti di apici
             cash_on_hand_val = sec_data.get('cash_on_hand', ' - ')
             monthly_burn_val_str = sec_data.get('monthly_burn', ' - ')
             curr_assets_ratio_val = sec_data.get('current_assets_ratio', ' - ')
             liquidity_test_val = sec_data.get('liquidity_test', ' - ')
 
-            # DEFINIZIONE DELLE SCRIBILI DEI TOOLTIP REVISIONATE DA LUCA (SENZA ATTESE DI LATENZA DI RETE)
-            coh_tooltip = 'Cash on Hand <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Ultima cassa liquida disponibile dichiarata nel report SEC.</span></span>'
-            mb_tooltip = 'Monthly Burn <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Velocità media mensile di utilizzo delle riserve liquide.</span></span>'
-            rc_tooltip = 'Runway Cassa <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Autonomia di cassa in mesi prima del completo esaurimento delle riserves.</span></span>'
-            car_tooltip = 'Cash / Current Assets % <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Indica la percentuale delle attività correnti dichiarate sostenuta da cassa liquida reale.</span></span>'
-            ltr_tooltip = 'Liquidity Test Ratio <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">Rapporto tra cassa liquida e passività correnti (debiti entro l\'anno). Un valore inferiore a 1.2 indica alto rischio di insolvenza immediata e diluizione forzata.</span></span>'
+            # DEFINIZIONE DELLE FRASI DI HELP (TOOLTIP) REVISIONATE (MINUSCOLO, NO PUNTI FINALI, VIRGOLA AGGIUNTA)
+            coh_tooltip = 'Cash on Hand <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">ultima cassa liquida disponibile dichiarata nel report SEC</span></span>'
+            mb_tooltip = 'Monthly Burn <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">velocità media mensile di utilizzo delle riserve liquide</span></span>'
+            rc_tooltip = 'Runway Cassa <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">autonomia di cassa in mesi, prima del completo esaurimento delle riserve</span></span>'
+            car_tooltip = 'Cash / Current Assets % <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">indica la percentuale delle attività correnti, sostenuta da cassa liquida reale</span></span>'
+            ltr_tooltip = 'Liquidity Test Ratio <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">rapporto tra cassa liquida e passività correnti (debiti entro l\'anno), un valore inferiore a 1.2 indica un alto rischio di insolvenza immediata e diluizione forzata</span></span>'
 
-            # 1. AUTONOMIA DI CASSA (CASH RUNWAY) IN CIMA AL COCKPIT (Sfondi dinamici neri `#000000` in Dark Mode tramite variabili CSS)
+            # 1. AUTONOMIA DI CASSA (CASH RUNWAY) IN CIMA AL COCKPIT
             st.markdown("<div style='font-size: 14.5px; font-weight: bold; margin-bottom: 10px;'>📊 AUTONOMIA DI CASSA (CASH RUNWAY)</div>", unsafe_allow_html=True)
             
             # Griglia di metriche superiori (Cassa, Burn, Runway)
@@ -1935,13 +1954,13 @@ with col3:
             """
             st.markdown(metrics_bottom_html, unsafe_allow_html=True)
 
-            # COMMENTO INERENTE LA CASSA: Posizionato immediatamente sotto le metriche (indipendente dalle offerings)
-            st.markdown(f"<div style='font-size: 13.5px; font-weight: bold; color: {runway_color}; margin-top: 0px; margin-bottom: 25px; font-family: system-ui,-apple-system; text-align: center;'>{cash_msg}</div>", unsafe_allow_html=True)
+            # COMMENTO INERENTE LA CASSA: Posizionato immediatamente sotto le metriche con colore indipendente ed esatto
+            st.markdown(f"<div style='font-size: 13.5px; font-weight: bold; color: {cash_color}; margin-top: 0px; margin-bottom: 25px; font-family: system-ui,-apple-system; text-align: center;'>{cash_msg}</div>", unsafe_allow_html=True)
 
-            # 2. BOX OFFERINGS: Interamente dedicato alla diluizione azionaria reale (Scenario 1, 2, 3 o Option A)
+            # 2. BOX OFFERINGS: Titolo pulito "OFFERINGS" senza alcun simbolo di pericolo (⚠️ eliminata)
             risk_badge_html = f"""
             <div style="background-color: var(--badge-bg); border: 1px solid var(--badge-border); border-left: 5px solid #757575; padding: 12px; margin-top: 15px; margin-bottom: 20px; border-radius: 4px; font-family: system-ui,-apple-system;">
-                <div style="font-size: 13.5px; font-weight: bold; color: var(--text-news); margin-bottom: 6px;">⚠️ OFFERINGS</div>
+                <div style="font-size: 13.5px; font-weight: bold; color: var(--text-news); margin-bottom: 6px;">OFFERINGS</div>
                 <div style="color: var(--text-news); font-size: 13px; line-height: 1.4;">{offering_msg}</div>
             </div>
             """
