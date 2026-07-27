@@ -1905,7 +1905,7 @@ with col3:
                                 # Scenario 2 (Usa il link_html invece di testo piatto)
                                 offering_msg = f"{link_html} depositato il {offering_date_str}<br>Successivamente al deposito - Registrate {n_green} giornate in gap ≥ 30% con Volume e chiusura GREEN.<br>Offering potenzialmente ancora pendente."
                     else:
-                        offering_msg = f"{link_html} depositato il {offering_date_str}<br>Successivamente al deposito - Nessuna giornata in gap ≥ 30% con Volume.<br>Pressione di vendita possibile."
+                        offering_msg = f"{link_html} depositato il {offering_date_str}<br>Successivamente al deposito - Nessuna giornata in gap ≥ 30% con Volume.<br>Pressione in vendita possibile."
                 except Exception as e:
                     offering_msg = f"{link_html} depositato il {offering_date_str}."
 
