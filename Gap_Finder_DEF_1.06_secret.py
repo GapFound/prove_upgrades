@@ -2004,7 +2004,7 @@ with col3:
             st.markdown(metrics_bottom_html, unsafe_allow_html=True)
 
             # COMMENTO INERENTE LA CASSA: Posizionato immediatamente sotto le metriche con colore indipendente ed esatto
-            st.markdown(f"<div style='font-size: 13.5px; font-weight: bold; color: {cash_color}; margin-top: 0px; margin-bottom: 25px; font-family: system-ui,-apple-system; text-align: center;'>{cash_msg}</div>", unsafe_allow_html=True)
+            #st.markdown(f"<div style='font-size: 13.5px; font-weight: bold; color: {cash_color}; margin-top: 0px; margin-bottom: 25px; font-family: system-ui,-apple-system; text-align: center;'>{cash_msg}</div>", unsafe_allow_html=True)
 
             # 2. BOX OFFERINGS: Titolo pulito "OFFERINGS" senza alcun simbolo di pericolo (⚠️ eliminata)
             risk_badge_html = f"""
