@@ -1890,7 +1890,7 @@ with col3:
                         
                         if gaps_after_30.empty:
                             # Scenario 1 (Usa il link_html invece di testo piatto)
-                            offering_msg = f"{link_html} depositato il {offering_date_str}<br>Successivamente al deposito - Nessuna giornata in gap ≥ 30% con Volume.<br>Pressione di vendita possibile."
+                            offering_msg = f"{link_html} depositato il {offering_date_str}<br>Successivamente al deposito - Nessuna giornata in gap ≥ 30% con Volume.<br>Pressione in vendita possibile."
                         else:
                             red_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'RED']
                             green_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'GREEN']
