@@ -1649,6 +1649,8 @@ with col1:
                 f'<div style="font-size: 12px; font-weight: normal; color: #444; margin-bottom: 10px;">{st.session_state.get("sector_industry", {}).get("industry", " - ")}</div>'
             )
             st.markdown(ticker_info_html, unsafe_allow_html=True)
+            st.write(f"**PROVIDER DATI:** {st.session_state.get('provider', provider)}")
+            
 
             # COPIA DEL DATAFRAME PER INIETTARE L'HTML DEL PUNTO INTERROGATIVO CON TOOLTIP NELLA CELLA IN ALTO A SINISTRA (escape=False)
             fond_df_copy = st.session_state['fondamentali'].copy()
