@@ -5,6 +5,16 @@
 Created on Thu Dec  5 11:34:33 2024
 
 @author: ninni
+
+Versione 1.08 - correzioni:
+- ripristino prezzi nominali corretto anche per split in avanti e fattori cumulati misti
+- fattori di split FMP non piu' arrotondati (reverse > 1:200 erano errati)
+- gap sul giorno di split corretto per i dati AlphaVantage (non aggiustati)
+- dati SEC: lettura IFRS (ifrs-full), valute diverse da USD, moduli F-1/F-3/40-F/6-K
+- dati SEC: data di riferimento del bilancio a video, cache con TTL e timeout
+- day-2: definizione esplicita (giorno prima gap >= 30% e vol > 1M) con interruttore a video
+- box offering indipendente dagli slider (storico completo, gap >= 30% e controvalore >= 10M$)
+- scraping StockAnalysis: corrispondenza esatta delle etichette
 """
 
 import numpy as np
@@ -16,7 +26,6 @@ from pprint import pprint
 from plotly.subplots import make_subplots
 import plotly.graph_objects as go
 
-from IPython.display import display, clear_output
 from bs4 import BeautifulSoup
 
 import yfinance as yf
@@ -28,96 +37,133 @@ import os
 import sys
 import textwrap
 
-# INIZIALIZZAZIONE DELLA SESSIONE GLOBALE PER EVITARE I BLOCCHI DI YAHOO FINANCE
-session = requests.Session()
-session.headers.update({
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-})
+#%%
+
+# =====================================================================================
+# PARAMETRI GLOBALI (modificabili qui senza toccare la logica)
+# =====================================================================================
+
+# DAY-2: un gap e' considerato day-2 se il GIORNO PRECEDENTE ha fatto gap >= 30% con volume > 1M
+DAY2_GAP_MIN = 30.0
+DAY2_VOL_MIN = 1_000_000
+
+# BOX OFFERING: giornate considerate "capaci di assorbire" un'offering
+OFFERING_GAP_MIN = 30.0
+OFFERING_DOLLAR_VOL_MIN = 10_000_000   # controvalore scambiato in $ (volume x prezzo medio)
+
+# DATI DI BILANCIO PIU' VECCHI DI COSI' VENGONO SEGNALATI IN ARANCIONE
+SEC_STALE_DAYS = 180
+
+# MODULI CONSIDERATI "REPORT UFFICIALI" PER I DATI XBRL (USA + EMITTENTI ESTERI)
+OFFICIAL_FORMS = ['10-Q', '10-K', '20-F', '40-F', '6-K']
+
+# USER-AGENT SEC (obbligatorio): letto dai secrets se presente, altrimenti valore di default
+try:
+    SEC_USER_AGENT = st.secrets.get("SEC_user_agent", "Luca Loiacono lucaloia@gmail.com")
+except Exception:
+    SEC_USER_AGENT = "Luca Loiacono lucaloia@gmail.com"
+SEC_HEADERS = {'User-Agent': SEC_USER_AGENT}
+
+CURRENCY_SYMBOLS = {
+    'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CNY': 'CN¥', 'RMB': 'CN¥',
+    'HKD': 'HK$', 'CAD': 'C$', 'AUD': 'A$', 'SGD': 'S$', 'ILS': '₪', 'CHF': 'CHF '
+}
 
 #%%
 
-# FUNZIONE UTILITY PER FORMATTARE I VALORI NUMERICI IN MILIONI O MILIARDI
-def format_millions(val):
+# FUNZIONE UTILITY PER FORMATTARE I VALORI NUMERICI IN MILIONI O MILIARDI (CON VALUTA)
+def format_millions(val, currency='USD'):
     if val is None:
         return ' - '
     try:
         val = float(val)
-        if val >= 10**9:
-            return f"${val/10**9:.2f}B"
-        elif val >= 10**6:
-            return f"${val/10**6:.2f}M"
-        elif val >= 10**3:
-            return f"${val/10**3:.2f}K"
-        return f"${val:.2f}"
+        symbol = CURRENCY_SYMBOLS.get(str(currency).upper(), f"{currency} ")
+        if abs(val) >= 10**9:
+            return f"{symbol}{val/10**9:.2f}B"
+        elif abs(val) >= 10**6:
+            return f"{symbol}{val/10**6:.2f}M"
+        elif abs(val) >= 10**3:
+            return f"{symbol}{val/10**3:.2f}K"
+        return f"{symbol}{val:.2f}"
     except:
         return ' - '
 
-# FUNZIONE INTERNA PER IL RECUPERO A CASCATA DEI TAG XBRL DELLA SEC (COMPRESO STANDARD IFRS / 20-F)
-# AGGIORNAMENTO DEFINITIVO: Scansione multi-tag con confronto cronologico incrociato per eliminare i falsi positivi da classificazione contabile obsoleta
-def get_latest_fact(us_gaap, tags):
-    best_fact = None
-    best_form = None
-    best_list = None
-    best_end_date = None
-    
-    for tag in tags:
-        node = us_gaap.get(tag)
-        if node:
-            units = node.get('units', {}).get('USD', [])
-            if units:
-                # 1. Filtra solo i report ufficiali 10-Q, 10-K e 20-F
-                official = [u for u in units if u.get('form') in ['10-Q', '10-K', '20-F']]
-                if not official:
-                    official = units
-                
-                # 2. FILTRO ANTI-SEGMENTO: Esclude tutti i dati segmentati (non consolidati)
-                consolidated = [u for u in official if 'segment' not in u]
-                if not consolidated:
-                    consolidated = official
-                
-                # 3. ORDINAMENTO CRONOLOGICO: Ordina per data 'end' e secondariamente per data 'filed'
-                sorted_facts = sorted(consolidated, key=lambda x: (x.get('end', ''), x.get('filed', '')))
-                
-                if sorted_facts:
-                    latest_item = sorted_facts[-1]
-                    current_end_str = latest_item.get('end', '')
-                    
-                    if current_end_str:
-                        try:
-                            # Convertiamo la stringa 'end' in oggetto date per un confronto sicuro
-                            current_end_dt = datetime.strptime(current_end_str, "%Y-%m-%d").date()
-                        except ValueError:
-                            current_end_dt = None
-                        
-                        if current_end_dt:
-                            # Se è il primo tag valido trovato, o se ha una data di bilancio più recente di quella memorizzata
-                            if (best_end_date is None) or (current_end_dt > best_end_date):
-                                best_end_date = current_end_dt
-                                best_fact = float(latest_item['val'])
-                                best_form = latest_item.get('form', '10-Q')
-                                best_list = sorted_facts
-                                
-    # Se abbiamo trovato un fatto valido tra tutti i tag analizzati, lo restituiamo
-    if best_fact is not None:
-        return best_fact, best_form, best_list
-        
-    return None, None, None
+# SCELTA DELL'UNITA' MONETARIA DI UN NODO XBRL: USD se presente, altrimenti la prima valuta ISO trovata
+def _pick_currency_units(node, currency=None):
+    units = node.get('units', {})
+    if currency:
+        return currency, units.get(currency, [])
+    if units.get('USD'):
+        return 'USD', units['USD']
+    for k, v in units.items():
+        if len(k) == 3 and k.isalpha() and k.isupper() and v:
+            return k, v
+    return None, []
+
+# FUNZIONE INTERNA PER IL RECUPERO A CASCATA DEI TAG XBRL DELLA SEC
+# Legge sia la tassonomia US-GAAP sia IFRS (ifrs-full, usata da molti emittenti esteri 20-F/40-F)
+# Se 'currency' e' indicata, considera solo valori in quella valuta (per avere rapporti coerenti)
+# Ritorna: valore, modulo, lista ordinata, valuta, data di fine periodo
+def get_latest_fact(facts_root, tags, currency=None):
+    best = None  # (end_date, val, form, sorted_list, currency)
+
+    for taxonomy in ['us-gaap', 'ifrs-full']:
+        tax_node = facts_root.get(taxonomy, {})
+        if not tax_node:
+            continue
+        for tag in tags:
+            node = tax_node.get(tag)
+            if not node:
+                continue
+            cur, units = _pick_currency_units(node, currency)
+            if not units:
+                continue
+
+            # 1. Filtra solo i report ufficiali
+            official = [u for u in units if u.get('form') in OFFICIAL_FORMS]
+            if not official:
+                official = units
+
+            # 2. FILTRO ANTI-SEGMENTO: Esclude tutti i dati segmentati (non consolidati)
+            consolidated = [u for u in official if 'segment' not in u]
+            if not consolidated:
+                consolidated = official
+
+            # 3. ORDINAMENTO CRONOLOGICO: Ordina per data 'end' e secondariamente per data 'filed'
+            sorted_facts = sorted(consolidated, key=lambda x: (x.get('end', ''), x.get('filed', '')))
+            if not sorted_facts:
+                continue
+
+            latest_item = sorted_facts[-1]
+            try:
+                current_end_dt = datetime.strptime(latest_item.get('end', ''), "%Y-%m-%d").date()
+            except ValueError:
+                continue
+
+            if best is None or current_end_dt > best[0]:
+                best = (current_end_dt, float(latest_item['val']), latest_item.get('form', '10-Q'), sorted_facts, cur)
+
+    if best is not None:
+        end_dt, val, form, lst, cur = best
+        return val, form, lst, cur, end_dt
+
+    return None, None, None, None, None
 
 
 # FUNZIONE PER ESTRARRE E CALCOLARE IL BURN RATE SULL'OPERATING CASH FLOW REALE (OCF)
-def get_ocf_burn(us_gaap, cash_val):
+def get_ocf_burn(facts_root, currency):
     ocf_tags = [
         'NetCashProvidedByUsedInOperatingActivities',
         'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations',
         'CashFlowsFromUsedInOperatingActivities',
         'NetCashFlowsFromUsedInOperatingActivities'
     ]
-    ocf_val, ocf_form, ocf_units = get_latest_fact(us_gaap, ocf_tags)
-    
+    ocf_val, ocf_form, ocf_units, _, _ = get_latest_fact(facts_root, ocf_tags, currency=currency)
+
     # Se il flusso di cassa operativo è positivo (generazione di cassa), ritorniamo 0.0 (nessun burn)
     if ocf_val is not None and ocf_val >= 0:
         return 0.0
-        
+
     if ocf_val is not None and ocf_val < 0:
         # Trova l'ultima voce per calcolare i mesi di copertura reali dell'OCF (duration)
         latest_ocf = ocf_units[-1]
@@ -128,11 +174,29 @@ def get_ocf_burn(us_gaap, cash_val):
             if ocf_months < 1.0:
                 ocf_months = 3.0 # Fallback trimestre
         except:
-            ocf_months = 12.0 if ocf_form in ['10-K', '20-F'] else 3.0
-        
+            ocf_months = 12.0 if ocf_form in ['10-K', '20-F', '40-F'] else 3.0
+
         monthly_burn = -ocf_val / ocf_months
         return monthly_burn
     return None
+
+# RICHIESTE SEC CON CACHE (15 MINUTI) E TIMEOUT: evita di riscaricare i JSON ad ogni interazione con gli slider
+# Le eccezioni NON vengono messe in cache: un errore temporaneo viene ritentato alla richiesta successiva
+@st.cache_data(ttl=900, max_entries=50, show_spinner=False)
+def _sec_get_json(url):
+    res = requests.get(url, headers=SEC_HEADERS, timeout=10)
+    res.raise_for_status()
+    return res.json()
+
+# PRIMI 40KB DI UN DOCUMENTO SEC (COPERTINA) CON CACHE DI 24 ORE: il documento depositato non cambia
+@st.cache_data(ttl=86400, max_entries=300, show_spinner=False)
+def _sec_get_doc_head(url):
+    range_headers = dict(SEC_HEADERS)
+    range_headers['Range'] = 'bytes=0-40000'
+    res = requests.get(url, headers=range_headers, timeout=10)
+    if res.status_code in [200, 206]:
+        return res.text.lower()
+    raise RuntimeError(f"HTTP {res.status_code}")
 
 # NORMALIZZAZIONE DEI VALORI NUMERICI DI STOCKANALYSIS PER ALLINEARLI ALLA NOTAZIONE MILIONE DI YFINANCE
 def format_sa_numeric_value(val_str):
@@ -184,17 +248,24 @@ def fetch_stockanalysis_stats(nome_ticker):
                     val = cells[1].get_text(strip=True)
                     stats[label] = val
             
-            def find_val(possible_keys):
+            # RICERCA ETICHETTA: prima corrispondenza ESATTA, poi parziale escludendo le etichette indesiderate
+            # (es. cercando 'float' non deve prendere 'Short % of Float')
+            def find_val(possible_keys, exclude=()):
                 for pk in possible_keys:
                     for k, v in stats.items():
-                        if pk.lower() in k.lower():
+                        if k.strip().lower() == pk.lower():
+                            return v
+                for pk in possible_keys:
+                    for k, v in stats.items():
+                        kl = k.lower()
+                        if pk.lower() in kl and not any(ex in kl for ex in exclude):
                             return v
                 return ' - '
-            
+
             return {
                 'M.Cap': format_sa_numeric_value(find_val(['market cap', 'market capitalization'])),
-                'Outstand.': format_sa_numeric_value(find_val(['shares outstanding'])),
-                'Float': format_sa_numeric_value(find_val(['float'])),
+                'Outstand.': format_sa_numeric_value(find_val(['shares outstanding'], exclude=('change', '%', 'class'))),
+                'Float': format_sa_numeric_value(find_val(['float', 'shares float', 'float shares'], exclude=('%', 'short'))),
                 'Insider': find_val(['owned by insiders']),
                 'Inst.O.': find_val(['owned by institutions']),
                 'S.Float': find_val(['short % of float'])
@@ -213,34 +284,44 @@ def fetch_sec_data(cik):
         'current_assets_ratio': ' - ',
         'liquidity_test': ' - ',
         'risk_status': 'UNKNOWN',
-        'active_offering': 'Nessun deposito SEC recente per potenziale emissione di azioni (S-1, S-3, 424B) negli ultimi 180 giorni.',
+        'active_offering': 'Nessun deposito SEC recente per potenziale emissione di azioni (S-1, S-3, F-1, F-3, 424B) negli ultimi 180 giorni.',
         'active_offering_date': ' - ',
         'active_offering_form': ' - ',
         'active_offering_link': ' - ',
-        'sec_links': []
+        'sec_links': [],
+        'currency': ' - ',
+        'data_date': ' - ',
+        'data_form': ' - '
     }
     if not cik or str(cik).strip() in ['', '-', ' - ']:
         return default_sec
         
     try:
         cik_str = str(cik).strip().zfill(10)
-        # SEC richiede obbligatoriamente un User-Agent identificativo chiaro
-        headers = {'User-Agent': 'Luca Loiacono lucaloia@gmail.com'}
         
         # 1. Recupero dati finanziari (Company Facts) per Cash & Solvibilità
         facts_url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik_str}.json"
-        facts_res = requests.get(facts_url, headers=headers)
+        try:
+            facts = _sec_get_json(facts_url)
+        except Exception as e:
+            print("Errore download companyfacts SEC:", e)
+            facts = None
         
         cash_val = None
         assets_val = None
         liabilities_val = None
         monthly_burn_val = None
         runway_str = " - "
+        ratio_str = " - "
+        liq_str = " - "
+        cash_currency = 'USD'
+        cash_end_dt = None
+        cash_form = None
         risk_status = "GREEN" # Default prudente in salute se c'è cassa
         
-        if facts_res.status_code == 200:
-            facts = facts_res.json()
-            us_gaap = facts.get('facts', {}).get('us-gaap', {})
+        if facts:
+            # Radice dei fatti XBRL: contiene sia 'us-gaap' sia 'ifrs-full' (emittenti esteri)
+            facts_root = facts.get('facts', {})
             
             # Dizionari di tag a cascata (fallback) per massima accuratezza su US-GAAP e IFRS (moduli 20-F straniere)
             cash_tags = [
@@ -253,21 +334,22 @@ def fetch_sec_data(cik):
             assets_tags = ['AssetsCurrent', 'CurrentAssets']
             liabilities_tags = ['LiabilitiesCurrent', 'CurrentLiabilities']
             
-            cash_val, cash_form, cash_units = get_latest_fact(us_gaap, cash_tags)
-            assets_val, _, _ = get_latest_fact(us_gaap, assets_tags)
-            liabilities_val, _, _ = get_latest_fact(us_gaap, liabilities_tags)
+            cash_val, cash_form, cash_units, cash_currency, cash_end_dt = get_latest_fact(facts_root, cash_tags)
+            if cash_currency is None:
+                cash_currency = 'USD'
+            # Attività e passività lette NELLA STESSA VALUTA della cassa, altrimenti i rapporti non hanno senso
+            assets_val, _, _, _, _ = get_latest_fact(facts_root, assets_tags, currency=cash_currency)
+            liabilities_val, _, _, _, _ = get_latest_fact(facts_root, liabilities_tags, currency=cash_currency)
             
             if cash_val is None:
                 risk_status = "UNKNOWN"
             
             # Calcolo dei Ratio di solvibilità immediati
-            ratio_str = " - "
             ratio_val = None
             if cash_val is not None and assets_val:
                 ratio_val = (cash_val / assets_val) * 100
                 ratio_str = f"{ratio_val:.2f}%"
                 
-            liq_str = " - "
             liq_val = None
             if cash_val is not None and liabilities_val:
                 liq_val = cash_val / liabilities_val
@@ -278,7 +360,7 @@ def fetch_sec_data(cik):
                     risk_status = "YELLOW"
             
             # DETERMINAZIONE DEL BURN RATE OPERATIVO REALE (OCF)
-            ocf_burn = get_ocf_burn(us_gaap, cash_val)
+            ocf_burn = get_ocf_burn(facts_root, cash_currency) if cash_val is not None else None
             
             if ocf_burn is not None and cash_val is not None:
                 if ocf_burn == 0.0:
@@ -299,7 +381,7 @@ def fetch_sec_data(cik):
                 # FALLBACK: Variazione temporale del saldo di cassa se l'OCF è assente
                 if cash_units:
                     # Seleziona i report ufficiali per ridurre il rumore, altrimenti usa tutti i record disponibili
-                    official_units = [u for u in cash_units if u.get('form') in ['10-Q', '10-K', '20-F']]
+                    official_units = [u for u in cash_units if u.get('form') in OFFICIAL_FORMS]
                     target_units = official_units if official_units else cash_units
                     
                     unique_cash = {}
@@ -376,16 +458,19 @@ def fetch_sec_data(cik):
         
         # 2. Recupero moduli depositati (Submissions) per trovare Offering attive negli ultimi 6 mesi
         sub_url = f"https://data.sec.gov/submissions/CIK{cik_str}.json"
-        sub_res = requests.get(sub_url, headers=headers)
+        try:
+            sub_data = _sec_get_json(sub_url)
+        except Exception as e:
+            print("Errore download submissions SEC:", e)
+            sub_data = None
         
-        active_offering = "Nessun deposito SEC recente per potenziale emissione di azioni (S-1, S-3, 424B) negli ultimi 180 giorni."
+        active_offering = "Nessun deposito SEC recente per potenziale emissione di azioni (S-1, S-3, F-1, F-3, 424B) negli ultimi 180 giorni."
         active_offering_date = " - "
         active_offering_form = " - "
         active_offering_link = " - "
         sec_links = []
         
-        if sub_res.status_code == 200:
-            sub_data = sub_res.json()
+        if sub_data:
             recent = sub_data.get('filings', {}).get('recent', {})
             
             forms = recent.get('form', [])
@@ -393,8 +478,11 @@ def fetch_sec_data(cik):
             accessions = recent.get('accessionNumber', [])
             primary_docs = recent.get('primaryDocument', [])
             
-            offering_forms = ["S-1", "S-3", "424B3", "424B4", "424B5", "424B7", "S-1/A", "S-3/A"]
-            magic_words = ["common stock", "common shares", "ordinary shares", "at-the-market", "at the market"]
+            # Moduli di registrazione (S = emittenti USA, F = emittenti esteri) e supplementi 424B
+            registration_forms = ["S-1", "S-3", "S-1/A", "S-3/A", "F-1", "F-3", "F-1/A", "F-3/A"]
+            offering_forms = registration_forms + ["424B1", "424B2", "424B3", "424B4", "424B5", "424B7"]
+            magic_words = ["common stock", "common shares", "ordinary shares", "at-the-market", "at the market",
+                           "american depositary shares", "american depositary share"]
             debt_words = ["senior notes", "notes due", "debt securities", "senior debt", "underwritten notes"]
             found_offering = False
             links_count = 0
@@ -408,7 +496,7 @@ def fetch_sec_data(cik):
                 doc = primary_docs[i]
                 sec_link = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc_no}/{doc}"
                 
-                if form_type in ["10-K", "10-Q", "20-F", "S-1", "S-3", "424B3", "424B5"]:
+                if form_type in ["10-K", "10-Q", "20-F", "40-F", "S-1", "S-3", "F-1", "F-3", "424B3", "424B4", "424B5"]:
                     filing_id = (filing_date, form_type)
                     if filing_id not in seen_filings:
                         if links_count < 3:
@@ -426,21 +514,20 @@ def fetch_sec_data(cik):
                         filing_dt = datetime.strptime(filing_date, "%Y-%m-%d").date()
                         if (datetime.now().date() - filing_dt).days <= 180:
                             # SCRAPER INTERNO CHIRURGICO: Scarichiamo solo la copertina (primi 40KB) tramite HTTP Range Request per massima efficienza
-                            range_headers = {
-                                'User-Agent': 'Luca Loiacono lucaloia@gmail.com',
-                                'Range': 'bytes=0-40000'
-                            }
-                            doc_res = requests.get(sec_link, headers=range_headers, timeout=5)
+                            try:
+                                doc_text = _sec_get_doc_head(sec_link)
+                            except Exception as e:
+                                print("Errore download copertina documento SEC:", e)
+                                doc_text = None
                             is_equity = False
                             
-                            if doc_res.status_code in [200, 206]:
-                                doc_text = doc_res.text.lower()
+                            if doc_text is not None:
                                 # Verifichiamo la presenza dei termini azionari e di debito
                                 has_equity = any(word in doc_text for word in magic_words)
                                 has_debt = any(word in doc_text for word in debt_words)
                                 
                                 # NUOVA LOGICA REVISIONATA CON DISTINZIONE TRA REGISTRAZIONI PRIMARIE E SUPPLEMENTI
-                                if form_type in ["S-1", "S-3", "S-1/A", "S-3/A"]:
+                                if form_type in registration_forms:
                                     if has_equity:
                                         is_equity = True
                                 else:
@@ -461,8 +548,8 @@ def fetch_sec_data(cik):
                         print("Errore nel parsing del testo parziale del documento SEC:", e)
                     
         return {
-            'cash_on_hand': format_millions(cash_val) if cash_val is not None else ' - ',
-            'monthly_burn': format_millions(monthly_burn_val) if monthly_burn_val is not None else ' - ',
+            'cash_on_hand': format_millions(cash_val, cash_currency) if cash_val is not None else ' - ',
+            'monthly_burn': format_millions(monthly_burn_val, cash_currency) if monthly_burn_val is not None else ' - ',
             'runway_months': runway_str,
             'current_assets_ratio': ratio_str,
             'liquidity_test': liq_str,
@@ -471,7 +558,10 @@ def fetch_sec_data(cik):
             'active_offering_date': active_offering_date,
             'active_offering_form': active_offering_form,
             'active_offering_link': active_offering_link,
-            'sec_links': sec_links
+            'sec_links': sec_links,
+            'currency': cash_currency if cash_val is not None else ' - ',
+            'data_date': cash_end_dt.strftime("%Y-%m-%d") if cash_end_dt else ' - ',
+            'data_form': cash_form if cash_form else ' - '
         }
     except Exception as e:
         print("Errore estrazione SEC EDGAR:", e)
@@ -568,20 +658,20 @@ def fetch_polygon_profile(nome_ticker):
                 "GG": "Guernsey", "GH": "Ghana", "GI": "Gibraltar", "GL": "Greenland", "GM": "Gambia",
                 "GN": "Guinea", "GP": "Guadeloupe", "GQ": "Equatorial Guinea", "GR": "Greece",
                 "GS": "South Georgia & South Sandwich Islands", "GT": "Guatemala", "GU": "Guam", "GW": "Guinea-Bissau",
-                "GY": "Government of Guyana", "HK": "Hong Kong", "HM": "Heard Island and McDonald Islands", "HN": "Honduras",
+                "GY": "Guyana", "HK": "Hong Kong", "HM": "Heard Island and McDonald Islands", "HN": "Honduras",
                 "HR": "Croatia", "HT": "Haiti", "HU": "Hungary", "ID": "Indonesia", "IE": "Ireland",
                 "IL": "Israel", "IM": "Isle of Man", "IN": "India", "IO": "British Indian Ocean Territory",
                 "IQ": "Iraq", "IR": "Iran", "IS": "Iceland", "IT": "Italy", "JE": "Jersey", "JM": "Jamaica",
                 "JO": "Jordan", "JP": "Japan", "KE": "Kenya", "KG": "Kyrgyzstan", "KH": "Cambodia",
                 "KI": "Kiribati", "KM": "Comoros", "KN": "Saint Kitts and Nevis", "KP": "North Korea",
                 "KR": "South Korea", "KW": "Kuwait", "KY": "Cayman Islands", "KZ": "Kazakhstan",
-                "LA": "Laos", "LB": "Lebanon", "LC": "Saint Lucia", "LI": "Lichtenstein", "LK": "Sri Lanka",
+                "LA": "Laos", "LB": "Lebanon", "LC": "Saint Lucia", "LI": "Liechtenstein", "LK": "Sri Lanka",
                 "LR": "Liberia", "LS": "Lesotho", "LT": "Lithuania", "LU": "Luxembourg", "LV": "Latvia",
                 "LY": "Libya", "MA": "Morocco", "MC": "Monaco", "MD": "Moldova", "ME": "Montenegro",
                 "MF": "Saint Martin", "MG": "Madagascar", "MH": "Marshall Islands", "MK": "North Macedonia",
                 "ML": "Mali", "MM": "Myanmar", "MN": "Mongolia", "MO": "Macao", "MP": "Northern Mariana Islands",
                 "MQ": "Martinique", "MR": "Mauritania", "MS": "Montserrat", "MT": "Malta", "MU": "Mauritius",
-                "MV": "Maldives", "MW": "Malawi", "MX": "Mexico", "MY": "Malaysia", "MZ": "Possession", "NA": "Namibia",
+                "MV": "Maldives", "MW": "Malawi", "MX": "Mexico", "MY": "Malaysia", "MZ": "Mozambique", "NA": "Namibia",
                 "NC": "New Caledonia", "NE": "Niger", "NF": "Norfolk Island", "NG": "Nigeria",
                 "NI": "Nicaragua", "NL": "Netherlands", "NO": "Norway", "NP": "Nepal", "NR": "Nauru",
                 "NU": "Niue", "NZ": "New Zealand", "OM": "Oman", "PA": "Panama", "PE": "Peru", "PF": "French Polynesia",
@@ -591,11 +681,11 @@ def fetch_polygon_profile(nome_ticker):
                 "RS": "Serbia", "RU": "Russia", "RW": "Rwanda", "SA": "Saudi Arabia", "SB": "Solomon Islands",
                 "SC": "Seychelles", "SD": "Sudan", "SE": "Sweden", "SG": "Singapore", "SH": "Saint Helena",
                 "SI": "Slovenia", "SJ": "Svalbard and Jan Mayen", "SK": "Slovakia", "SL": "Sierra Leone",
-                "SM": "San Marino", "SN": "Senegal", "SO": "Supporters", "SR": "Suriname", "SS": "South Sudan",
+                "SM": "San Marino", "SN": "Senegal", "SO": "Somalia", "SR": "Suriname", "SS": "South Sudan",
                 "ST": "São Tomé and Príncipe", "SV": "El Salvador", "SX": "Sint Maarten", "SY": "Syria",
                 "SZ": "Eswatini", "TC": "Turks and Caicos Islands", "TD": "Chad", "TF": "French Southern Territories",
                 "TG": "Togo", "TH": "Thailand", "TJ": "Tajikistan", "TK": "Tokelau", "TL": "Timor-Leste",
-                "TM": "Turkmenistan", "TN": "Turnip", "TO": "Tonga", "TR": "Turkey", "TT": "Trinidad and Tobago",
+                "TM": "Turkmenistan", "TN": "Tunisia", "TO": "Tonga", "TR": "Turkey", "TT": "Trinidad and Tobago",
                 "TV": "Tuvalu", "TW": "Taiwan", "TZ": "Tanzania", "UA": "Ukraine", "UG": "Uganda",
                 "UM": "U.S. Outlying Islands", "US": "United States", "UY": "Uruguay", "UZ": "Uzbekistan",
                 "VA": "Vatican City", "VC": "Saint Vincent and the Grenadines", "VE": "Venezuela",
@@ -872,7 +962,15 @@ def render_table_with_slider(
 # QUESTO BLOCCO CARICA I DATI DA YAHOO FINANCE E POI ELABORA IL DF DATI_STORICI
 
 def elaborazione(dati_storici, provider):
-    dati_storici['Gap %'] = ((dati_storici['Open']*100)/dati_storici['Close'].shift(1))-100
+    prev_close = dati_storici['Close'].shift(1)
+    
+    # ALPHAVANTAGE fornisce prezzi NON aggiustati: nel giorno di split la chiusura precedente va riportata
+    # alla nuova scala, altrimenti un reverse split 1:10 appare come un falso gap del +900%
+    if provider == "alphavantage" and 'Stock Splits' in dati_storici.columns:
+        split_del_giorno = dati_storici['Stock Splits'].replace(0, 1).fillna(1)
+        prev_close = prev_close / split_del_giorno
+    
+    dati_storici['Gap %'] = ((dati_storici['Open']*100)/prev_close)-100
 
     colonna_da_spostare = dati_storici.pop('Gap %')
     dati_storici.insert(1, 'Gap %', colonna_da_spostare)
@@ -886,36 +984,23 @@ def elaborazione(dati_storici, provider):
     dati_storici_ADJ = dati_storici.round(3).copy()
     
     if provider == "yfinance":
-            trans = pd.DataFrame(index=range(0, len(dati_storici)))
-            trans['split_factor'] = 0
-            split_factor = 1
+            # RIPRISTINO DEI PREZZI NOMINALI (quelli realmente quotati quel giorno)
+            # yfinance restituisce prezzi aggiustati per gli split: ogni giornata precedente a uno split
+            # va moltiplicata per il prodotto dei fattori di split successivi (prezzi) e divisa per lo stesso (volumi).
+            # Vale sia per i reverse split (fattore < 1) sia per gli split in avanti (fattore > 1) e per i casi misti.
+            n = len(dati_storici)
+            fattori = np.ones(n)
+            split_factor = 1.0
+            splits = dati_storici['Stock Splits'].fillna(0).values
         
-            for a in range((len(dati_storici)-1), -1, -1):
-                    if dati_storici['Stock Splits'].iloc[a] > 0:
-                            trans.loc[a, 'split_factor'] = split_factor
-                            split_factor = split_factor*dati_storici['Stock Splits'].iloc[a]
-                    else:
-                            trans.loc[a, 'split_factor'] = split_factor
+            for a in range(n-1, -1, -1):
+                    fattori[a] = split_factor
+                    if splits[a] > 0:
+                            split_factor = split_factor*splits[a]
         
-            dati_storici['Open'] = dati_storici.apply(lambda x: x['Open']*trans.loc[x.name, 'split_factor'] if\
-                                      (trans.loc[x.name, 'split_factor']< 1) else \
-                                          (x['Open']/trans.loc[x.name, 'split_factor']), axis=1)
-                
-            dati_storici['High'] = dati_storici.apply(lambda x: x['High']*trans.loc[x.name, 'split_factor'] if\
-                                      (trans.loc[x.name, 'split_factor']< 1) else \
-                                          (x['High']/trans.loc[x.name, 'split_factor']), axis=1)
-                
-            dati_storici['Low'] = dati_storici.apply(lambda x: x['Low']*trans.loc[x.name, 'split_factor'] if\
-                                      (trans.loc[x.name, 'split_factor']< 1) else \
-                                          (x['Low']/trans.loc[x.name, 'split_factor']), axis=1)
-                
-            dati_storici['Close'] = dati_storici.apply(lambda x: x['Close']*trans.loc[x.name, 'split_factor'] if\
-                                      (trans.loc[x.name, 'split_factor']< 1) else \
-                                          (x['Close']/trans.loc[x.name, 'split_factor']), axis=1) 
-                
-            dati_storici['Volume'] = dati_storici.apply(lambda x: x['Volume']/trans.loc[x.name, 'split_factor'] if\
-                                      (trans.loc[x.name, 'split_factor']< 1) else \
-                                          (x['Volume']*trans.loc[x.name, 'split_factor']), axis=1)    
+            for col in ['Open', 'High', 'Low', 'Close']:
+                    dati_storici[col] = dati_storici[col].values * fattori
+            dati_storici['Volume'] = dati_storici['Volume'].values / fattori
 
     dati_storici = dati_storici.round(3)
     return dati_storici_ADJ, dati_storici
@@ -929,7 +1014,7 @@ def formatta_splits(dati_storici):
     split_df.index = split_df['Date']
     split_df.drop('Date', axis=1, inplace=True)
 
-    split_df['Stock Splits'] = split_df['Stock Splits'].apply(lambda x: f'1/{int(1/x)}' \
+    split_df['Stock Splits'] = split_df['Stock Splits'].apply(lambda x: f'1/{int(round(1/x))}' \
                                 if x<1 else f'{x:.1f}/1'.replace('.', ','))
     
     split_df.rename(columns={'Stock Splits': 'split_factor'}, inplace=True)
@@ -947,7 +1032,8 @@ def stock_split(nome_ticker, cache_file, FMP_api_key):
          if len(data['historical'])>0:
              my_data = []
              for a in data['historical']:
-                 single = {'Date': a['date'], 'split_factor': eval(f"{a['numerator']/a['denominator']:.3f}")}
+                 # Fattore NON arrotondato: con 3 decimali un reverse 1:300 diventava 0.003 (1:333)
+                 single = {'Date': a['date'], 'split_factor': float(a['numerator'])/float(a['denominator'])}
                  my_data.append(single)
                     
              splits_df = pd.DataFrame(my_data)
@@ -956,9 +1042,8 @@ def stock_split(nome_ticker, cache_file, FMP_api_key):
          else:
              splits_df = pd.DataFrame()  
              
-         if len(data)>0: 
-             with open(cache_file, 'wb') as f:
-                   pickle.dump(splits_df, f) 
+         # RIMOSSA la scrittura in cache del solo DataFrame degli split: sovrascriveva il file del ticker
+         # con un formato diverso da quello atteso in lettura (dizionario) e lo rendeva illeggibile
      except:  
          splits_df = pd.DataFrame()
          
@@ -980,7 +1065,7 @@ def fondamentali_func(nome_ticker):
     
     try:
         # Passata la sessione per evitare blocchi IP
-        ticker = yf.Ticker(nome_ticker.upper(),session=session)
+        ticker = yf.Ticker(nome_ticker.upper())
         fond = ticker.info
 
         def prendi_trasforma_valore(voce):
@@ -1143,7 +1228,7 @@ def datagathering_func(nome_ticker):
              splits_df=pd.DataFrame()
                 
         try:
-            ticker = yf.Ticker(nome_ticker.upper(),session=session)   
+            ticker = yf.Ticker(nome_ticker.upper())   
             dati_storici = ticker.history(period="max")
             
             if not dati_storici.empty:
@@ -1167,11 +1252,12 @@ def datagathering_func(nome_ticker):
             ALPHA_api_key = st.secrets["ALPHA_api_key"]
             symbol = nome_ticker.upper()
             function = 'TIME_SERIES_DAILY'
-            outputsize = 'full'
+            outputsize = 'compact'
       
             url = f'https://www.alphavantage.co/query?function={function}&symbol={symbol}&outputsize={outputsize}&apikey={ALPHA_api_key}'
             response = requests.get(url)
             data = response.json()
+            #st.write("DEBUG AV:", data)
       
             if 'Time Series (Daily)' in data:
                 time_series = data['Time Series (Daily)']
@@ -1259,18 +1345,25 @@ def datagathering_func(nome_ticker):
 
 # LA FUNZIONE CHE SEGUE CERCA I GAPS ALL'INTERNO DEL DF dati_storici 
 
-def ricerca_gaps(nome_ticker, dati_storici, gap_perc_A, gap_perc_B, volume, prezzo_A, prezzo_B):
+# Ritorna: (tabella formattata per la visualizzazione, tabella numerica, numero di day-2 nel filtro)
+# DAY-2: gap il cui GIORNO PRECEDENTE ha fatto gap >= DAY2_GAP_MIN con volume > DAY2_VOL_MIN
+# (il movimento non nasce dal nulla ma e' la prosecuzione di uno gia' esistente)
+def ricerca_gaps(nome_ticker, dati_storici, gap_perc_A, gap_perc_B, volume, prezzo_A, prezzo_B, escludi_day2=True):
     global gaps
-    gaps = dati_storici.iloc[:, [0, 1, 2, 3, 4, 5, 8, 9, 10, -1, 6]].copy()
-        
-    gaps['day1_extention'] = ((gaps['Close'].shift(1)*100)/gaps['Open'].shift(1))-100 
-    gaps['day1_volume'] = gaps['Volume'].shift(1)
-    gaps = gaps[(gaps['day1_extention']<30) | ( (gaps['day1_extention']>=30) & (gaps['day1_volume']<=1_000_000) )]
-    gaps.pop('day1_extention'); gaps.pop('day1_volume')
+    colonne = ['Date', 'Gap %', 'Open', 'High', 'Low', 'Close', 'Max % UP', 'Max % DOWN',
+               'Open to Close %', 'Chiusura', 'Volume']
+    gaps = dati_storici[colonne].copy()
     
-    gaps = gaps[(gaps['Gap %']>=gap_perc_A)&\
-                        (gaps['Gap %']<=gap_perc_B)&\
-                        (gaps['Volume']>=volume)&(gaps['Open']>=prezzo_A)&(gaps['Open']<=prezzo_B)]
+    is_day2 = (dati_storici['Gap %'].shift(1) >= DAY2_GAP_MIN) & (dati_storici['Volume'].shift(1) > DAY2_VOL_MIN)
+    
+    filtro = (gaps['Gap %']>=gap_perc_A) & (gaps['Gap %']<=gap_perc_B) & \
+             (gaps['Volume']>=volume) & (gaps['Open']>=prezzo_A) & (gaps['Open']<=prezzo_B)
+    
+    n_day2 = int((filtro & is_day2).sum())
+    if escludi_day2:
+        filtro = filtro & ~is_day2
+    
+    gaps = gaps[filtro]
     
     if not gaps.empty:    
         display_gaps = gaps.copy()
@@ -1284,10 +1377,23 @@ def ricerca_gaps(nome_ticker, dati_storici, gap_perc_A, gap_perc_B, volume, prez
             
         display_gaps.reset_index(drop=True, inplace=True)
         display_gaps.index = display_gaps.index+1
-        return display_gaps
+        return display_gaps, gaps, n_day2
     else: 
         print(f' il titolo {nome_ticker} non ha nessun gap superiore o uguale al {gap_perc_A}%')
-        return gaps
+        return gaps, gaps, n_day2
+
+#%%
+
+# GIORNATE SUCCESSIVE AL DEPOSITO DI UN'OFFERING CAPACI DI ASSORBIRLA
+# Calcolata SEMPRE sull'intero storico, indipendente dagli slider e dal filtro day-2.
+# Criterio: gap >= OFFERING_GAP_MIN e controvalore >= OFFERING_DOLLAR_VOL_MIN (volume x prezzo medio della giornata),
+# dalla data del deposito compresa (molti 424B vengono depositati prima dell'apertura del giorno stesso)
+def gap_dopo_offering(dati_storici, data_deposito):
+    df = dati_storici
+    date_giorno = pd.to_datetime(df['Date']).dt.date
+    controvalore = df['Volume'] * (df['High'] + df['Low'] + df['Close']) / 3
+    filtro = (df['Gap %'] >= OFFERING_GAP_MIN) & (controvalore >= OFFERING_DOLLAR_VOL_MIN) & (date_giorno >= data_deposito)
+    return df[filtro]
         
 #%%
 
@@ -1503,7 +1609,7 @@ with col1:
         """, unsafe_allow_html=True)
 
     with st.form(key=f'GAPs_Finder'):
-            nome_ticker = st.text_input('**GAPsFinder v 1.06mx**', placeholder='Enter the Ticker').strip()
+            nome_ticker = st.text_input('**GAPsFinder   1.08_YF_AV**', placeholder='Enter the Ticker').strip()
             bottone_ricerca = st.form_submit_button('ricerca GAPs')
          
     stampa_col1 = st.empty()  
@@ -1513,6 +1619,7 @@ with col1:
         st.session_state['slider_gaps']=(30, 1000)
         st.session_state['slider_volume']=1
         st.session_state['slider_price']=(2, 200)
+        st.session_state['chk_day2']=True
         
         CACHE_DIR = "cache"
         os.makedirs(CACHE_DIR, exist_ok=True)
@@ -1623,6 +1730,8 @@ with col1:
                 st.session_state['news'] = news
                 st.session_state['dati_split'] = dati_split
                 st.session_state['dati_storici_ADJ'] = dati_storici_ADJ
+                st.session_state['provider'] = provider   #'alphavantage'(per provare la scritta di Alert)
+                
         else:
             st.warning('Enter the Ticker')
             
@@ -1649,8 +1758,6 @@ with col1:
                 f'<div style="font-size: 12px; font-weight: normal; color: #444; margin-bottom: 10px;">{st.session_state.get("sector_industry", {}).get("industry", " - ")}</div>'
             )
             st.markdown(ticker_info_html, unsafe_allow_html=True)
-            st.write(f"**PROVIDER DATI:** {st.session_state.get('provider', provider)}")
-            
 
             # COPIA DEL DATAFRAME PER INIETTARE L'HTML DEL PUNTO INTERROGATIVO CON TOOLTIP NELLA CELLA IN ALTO A SINISTRA (escape=False)
             fond_df_copy = st.session_state['fondamentali'].copy()
@@ -1711,15 +1818,38 @@ with col2:
                gap_A, gap_B = st.slider("**Gap %**", 0, 1000, step=5, key='slider_gaps')
                volume = st.slider("**Volume Minimo Mln**", 0, 500, step=1, key='slider_volume')
                prezzo_A, prezzo_B = st.slider('**prezzo minimo $**', 0, 200, step=1, key='slider_price')
+               st.write("")
+               escludi_day2 = st.checkbox(
+                   "Escludi day-2", key='chk_day2',
+                   help=f"Esclude i gap il cui giorno precedente ha fatto gap ≥ {DAY2_GAP_MIN:.0f}% con volume > {DAY2_VOL_MIN/1_000_000:.0f}M: "
+                        "il movimento non nasce dal nulla ma prosegue uno già esistente.")
                
-           v_gaps = ricerca_gaps(nome_ticker, st.session_state['dati_storici'], \
-                                 gap_A, gap_B, volume*1_000_000, prezzo_A, prezzo_B) 
+           v_gaps, gaps_num, n_day2 = ricerca_gaps(nome_ticker, st.session_state['dati_storici'], \
+                                 gap_A, gap_B, volume*1_000_000, prezzo_A, prezzo_B, escludi_day2=escludi_day2)
+                                 
+
+           
+           # AVVISO COMPATTO DI FALLBACK ALPHAVANTAGE
+           if st.session_state.get('provider') == 'alphavantage':
+                st.markdown(
+                    "<div style='text-align: center; font-size: 12px; color: #d00; margin-top: 28px; margin-bottom: 8px; font-weight: 600; font-family: system-ui,-apple-system;'>"
+                    "⚠️ Dati storici YFinance non disponibili: analisi limitata agli ultimi 5 mesi (AlphaVantage)"
+                    "</div>",
+                    unsafe_allow_html=True
+                )
+                      
            
            st.write(""); st.write("")
            
            if not v_gaps.empty:
                # INTEGRATA LA FUNZIONE RENDER_TABLE_WITH_SLIDER SULLA COLONNA 2 DEI GAPPERS (reset_index=True, ingombro riallineato stabilmente al 95% per simmetria perfetta)
                render_table_with_slider(v_gaps, key="gaps", reset_index=True, font_px=11.5, width_pct=95)
+               
+               # NOTA TRASPARENTE SUL FILTRO DAY-2 (sempre visibile sotto le statistiche)
+               if escludi_day2:
+                   nota_day2 = f"day-2 esclusi: {n_day2}" if n_day2 > 0 else "day-2 esclusi: nessuno"
+               else:
+                   nota_day2 = f"day-2 inclusi nel campione: {n_day2}"
                
                # CALCOLO E VISUALIZZAZIONE DELLE STATISTICHE DI CHIUSURA RED/GREEN DEI GAPPER FILTRATI (CON CONTEGGIO MINIMALISTA IN REGULAR)
                total_gaps = len(v_gaps)
@@ -1730,10 +1860,10 @@ with col2:
                green_pct = (green_count / total_gaps) * 100
                
                # CALCOLO ROBUSTO E DINAMICO DELLE MEDIANE DELLE COLONNE RICHIESTE SUL DATAFRAME NUMERICO "GAPS"
-               med_gap = gaps['Gap %'].median()
-               med_up = gaps['Max % UP'].median()
-               med_down = gaps['Max % DOWN'].median()
-               med_otc = gaps['Open to Close %'].median()
+               med_gap = gaps_num['Gap %'].median()
+               med_up = gaps_num['Max % UP'].median()
+               med_down = gaps_num['Max % DOWN'].median()
+               med_otc = gaps_num['Open to Close %'].median()
                
                # FORMATTAZIONE COERENTE IN STANDARD ITALIANO (SOSTITUZIONE PUNTO CON VIRGOLA)
                med_gap_str = f"{med_gap:.2f}".replace('.', ',')
@@ -1753,6 +1883,9 @@ with col2:
                        Mediana Max UP: <b>{med_up_str}%</b> &nbsp;|&nbsp; 
                        Mediana Max DOWN: <b>{med_down_str}%</b> &nbsp;|&nbsp; 
                        Mediana Open to Close: <b>{med_otc_str}%</b>
+                   </div>
+                   <div style="text-align: center; font-size: 11.5px; margin-top: 6px; color: var(--date-color); font-family: system-ui,-apple-system;">
+                       {nota_day2}
                    </div>
                """)
            else:
@@ -1872,7 +2005,7 @@ with col3:
                     cash_color = "var(--text-news)"
 
             # 2. VALUTAZIONE E SCRITTURA DELLA SEZIONE OFFERING / DILUIZIONE
-            offering_msg = "Nessun deposito SEC recente per potenziale emissione di azioni (S-1, S-3, 424B) negli ultimi 180 giorni."
+            offering_msg = "Nessun deposito SEC recente per potenziale emissione di azioni (S-1, S-3, F-1, F-3, 424B) negli ultimi 180 giorni."
             offering_date_str = sec_data.get('active_offering_date', ' - ')
             form_type = sec_data.get('active_offering_form', ' - ')
             offering_link = sec_data.get('active_offering_link', ' - ')
@@ -1881,34 +2014,28 @@ with col3:
                 # CREAZIONE LINK IPERTESTUALE COORDINATO AL COLORE DEL TEMA GRAFICO
                 link_html = f'<a href="{offering_link}" style="text-decoration: none; color: var(--sec-link-color); font-weight: bold;" target="_blank">Form {form_type}</a>'
                 
+                # CRITERIO SEMPRE VISIBILE: le giornate sono valutate sull'intero storico, indipendentemente dagli slider
+                criterio = f"gap ≥ {OFFERING_GAP_MIN:.0f}% e controvalore ≥ {format_millions(OFFERING_DOLLAR_VOL_MIN)}"
+                
                 try:
                     off_date_dt = pd.to_datetime(offering_date_str).date()
-                    if 'gaps' in globals() and isinstance(gaps, pd.DataFrame) and not gaps.empty:
-                        gaps_df = gaps.copy()
-                        gaps_df['Date_dt'] = pd.to_datetime(gaps_df['Date']).dt.date
-                        
-                        # Criterio: Gap >= 30% cronologicamente successivi all'offering
-                        gaps_after_30 = gaps_df[(gaps_df['Gap %'] >= 30.0) & (gaps_df['Date_dt'] > off_date_dt)]
-                        
-                        if gaps_after_30.empty:
-                            # Scenario 1 (Usa il link_html invece di testo piatto)
-                            offering_msg = f"{link_html} depositato il {offering_date_str}<br>Successivamente al deposito - Nessuna giornata in gap ≥ 30% con Volume.<br>Pressione in vendita possibile."
-                        else:
-                            red_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'RED']
-                            green_gaps = gaps_after_30[gaps_after_30['Chiusura'] == 'GREEN']
-                            
-                            n_red = len(red_gaps)
-                            n_green = len(green_gaps)
-                            
-                            if n_red > 0:
-                                # Scenario 3 (Usa il link_html invece di testo piatto)
-                                offering_msg = f"{link_html} depositato il {offering_date_str}<br>Successivamente al deposito - Registrate {n_red} giornate in gap ≥ 30% con Volume e chiusura RED.<br>Offering parzialmente o interamente scaricata."
-                            else:
-                                # Scenario 2 (Usa il link_html invece di testo piatto)
-                                offering_msg = f"{link_html} depositato il {offering_date_str}<br>Successivamente al deposito - Registrate {n_green} giornate in gap ≥ 30% con Volume e chiusura GREEN.<br>Offering potenzialmente ancora pendente."
+                    gaps_after = gap_dopo_offering(st.session_state['dati_storici'], off_date_dt)
+                    
+                    if gaps_after.empty:
+                        # Scenario 1: nessuna giornata capace di assorbire l'offering
+                        offering_msg = f"{link_html} depositato il {offering_date_str}<br>Dal deposito - Nessuna giornata con {criterio}.<br>Pressione in vendita possibile."
                     else:
-                        offering_msg = f"{link_html} depositato il {offering_date_str}<br>Successivamente al deposito - Nessuna giornata in gap ≥ 30% con Volume.<br>Pressione in vendita possibile."
+                        n_red = int((gaps_after['Chiusura'] == 'RED').sum())
+                        n_green = int((gaps_after['Chiusura'] == 'GREEN').sum())
+                        
+                        if n_red > 0:
+                            # Scenario 3: almeno una giornata RED
+                            offering_msg = f"{link_html} depositato il {offering_date_str}<br>Dal deposito - Registrate {n_red} giornate con {criterio} e chiusura RED.<br>Offering possibilmente scaricata in parte o del tutto."
+                        else:
+                            # Scenario 2: solo giornate GREEN
+                            offering_msg = f"{link_html} depositato il {offering_date_str}<br>Dal deposito - Registrate {n_green} giornate con {criterio} e chiusura GREEN.<br>Offering potenzialmente ancora pendente."
                 except Exception as e:
+                    print("Errore analisi giornate post-offering:", e)
                     offering_msg = f"{link_html} depositato il {offering_date_str}."
 
             # Determinazione dei colori delle card in base alle soglie di solvibilità
@@ -2004,6 +2131,26 @@ with col3:
             </div>
             """
             st.markdown(metrics_bottom_html, unsafe_allow_html=True)
+
+            # DATA DI RIFERIMENTO DEL BILANCIO E VALUTA: un runway senza data non ha significato
+            # (gli emittenti esteri spesso depositano un solo bilancio XBRL l'anno)
+            data_bilancio = sec_data.get('data_date', ' - ')
+            if data_bilancio and data_bilancio != ' - ':
+                giorni_dato = None
+                try:
+                    giorni_dato = (datetime.now().date() - datetime.strptime(data_bilancio, "%Y-%m-%d").date()).days
+                except Exception:
+                    pass
+                vecchio = giorni_dato is not None and giorni_dato > SEC_STALE_DAYS
+                colore_data = "#f57f17" if vecchio else "var(--date-color)"
+                avviso = f" &nbsp;⚠️ dato di {giorni_dato} giorni fa" if vecchio else ""
+                valuta = sec_data.get('currency', ' - ')
+                nota_valuta = f" &nbsp;|&nbsp; valuta: <b>{valuta}</b>" if valuta not in [' - ', 'USD'] else ""
+                st.markdown(
+                    f"<div style='font-size: 12px; color: {colore_data}; margin-top: -4px; margin-bottom: 8px; font-family: system-ui,-apple-system;'>"
+                    f"Bilancio al <b>{data_bilancio}</b> ({sec_data.get('data_form', ' - ')}){nota_valuta}{avviso}</div>",
+                    unsafe_allow_html=True
+                )
 
             # COMMENTO INERENTE LA CASSA: Posizionato immediatamente sotto le metriche con colore indipendente ed esatto
             #st.markdown(f"<div style='font-size: 13.5px; font-weight: bold; color: {cash_color}; margin-top: 0px; margin-bottom: 25px; font-family: system-ui,-apple-system; text-align: center;'>{cash_msg}</div>", unsafe_allow_html=True)
