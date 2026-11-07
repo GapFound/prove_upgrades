@@ -1,8 +1,9 @@
 numpy==1.24.4
 pandas==1.5.3
 plotly==5.9.0
-IPython==8.15.0
-yfinance>=0.2.51
+yfinance
 finvizfinance
+beautifulsoup4
 streamlit==1.40.2
 requests
+curl-cffi
