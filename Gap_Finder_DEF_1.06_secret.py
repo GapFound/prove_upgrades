@@ -1397,7 +1397,12 @@ def datagathering_func(nome_ticker):
 #              La colonna Gap riporta il gap cumulato dalla chiusura precedente al day1 fino all'open del day2,
 #              tra parentesi il gap del day1 e quello del day2. La colonna 'vs Close D1' indica se il day2
 #              apre sopra (UP) o sotto (DOWN) la chiusura del day1.
-def ricerca_gaps(nome_ticker, dati_storici, gap_perc_A, gap_perc_B, volume, prezzo_A, prezzo_B, escludi_day2=True, modo='day1'):
+#              Il day1 deve essere un movimento ORIGINALE: se il day1 e' a sua volta un day-2 viene scartato,
+#              altrimenti la giornata successiva sarebbe in realta' un day3.
+#              solo_up / solo_down filtrano i day2 per apertura sopra/sotto la chiusura del day1
+#              (nessuno o entrambi selezionati = nessun filtro).
+def ricerca_gaps(nome_ticker, dati_storici, gap_perc_A, gap_perc_B, volume, prezzo_A, prezzo_B, escludi_day2=True, modo='day1',
+                 solo_up=False, solo_down=False):
     global gaps
     colonne = ['Date', 'Gap %', 'Open', 'High', 'Low', 'Close', 'Max % UP', 'Max % DOWN',
                'Open to Close %', 'Chiusura', 'Volume']
@@ -1413,7 +1418,7 @@ def ricerca_gaps(nome_ticker, dati_storici, gap_perc_A, gap_perc_B, volume, prez
     
     if modo == 'day2':
         # posizioni dei day1 che hanno un giorno successivo disponibile
-        pos_d1 = [p for p in np.flatnonzero(filtro.values) if p + 1 < len(df)]
+        pos_d1 = [p for p in np.flatnonzero((filtro & ~is_day2).values) if p + 1 < len(df)]
         pos_d2 = [p + 1 for p in pos_d1]
         gaps = df.iloc[pos_d2][colonne].copy()
         gap_d1 = df['Gap %'].iloc[pos_d1].values
@@ -1423,6 +1428,8 @@ def ricerca_gaps(nome_ticker, dati_storici, gap_perc_A, gap_perc_B, volume, prez
         gaps['Gap D1 %'] = gap_d1
         gaps['Gap D2 %'] = gap_d2
         gaps['vs Close D1'] = np.where(gap_d2 > 0, 'UP', np.where(gap_d2 < 0, 'DOWN', '='))
+        if solo_up != solo_down:
+            gaps = gaps[gaps['vs Close D1'] == ('UP' if solo_up else 'DOWN')]
     else:
         if escludi_day2:
             filtro = filtro & ~is_day2
@@ -1692,6 +1699,8 @@ with col1:
         st.session_state['slider_price']=(2, 200)
         st.session_state['chk_day2']=True
         st.session_state['radio_modo']='Day1'
+        st.session_state['chk_up']=False
+        st.session_state['chk_down']=False
         
         CACHE_DIR = "cache"
         os.makedirs(CACHE_DIR, exist_ok=True)
@@ -1892,27 +1901,41 @@ with col2:
                prezzo_A, prezzo_B = st.slider('**prezzo minimo $**', 0, 200, step=1, key='slider_price')
                st.write("")
                
-               # RIQUADRO MODALITA' DAY1 / DAY2 CON SOTTO-FLAG "ESCLUDI DAY-2" (carattere piu' piccolo e rientrato)
+               # RIQUADRO MODALITA' A TABELLA (2 righe):
+               #   Day1 | [ ] Escludi day-2
+               #   Day2 | [ ] Gap UP   [ ] Gap DOWN
+               # Le opzioni di ogni riga sono attive solo quando la relativa modalita' e' selezionata.
+               # Altezze fisse (40px) e spaziatura (16px) allineano le due voci del radio alle due righe di opzioni.
                st.markdown("""
                    <style>
-                   .st-key-chk_day2 { margin-left: 26px; margin-top: -10px; }
-                   .st-key-chk_day2 p { font-size: 12.5px !important; }
-                   .st-key-radio_modo label[data-baseweb="radio"] { margin-right: 18px; }
+                   .st-key-radio_modo { border-right: 1px solid rgba(128,128,128,0.35); padding-right: 6px; }
+                   .st-key-radio_modo div[role="radiogroup"] { gap: 16px !important; flex-direction: column; }
+                   .st-key-radio_modo div[role="radiogroup"] label { height: 40px; margin: 0 !important; align-items: center; }
+                   .st-key-chk_day2, .st-key-chk_up, .st-key-chk_down { height: 40px; display: flex; align-items: center; }
+                   .st-key-chk_day2 p, .st-key-chk_up p, .st-key-chk_down p { font-size: 12.5px !important; }
                    </style>
                """, unsafe_allow_html=True)
                with st.container(border=True):
-                   modo_label = st.radio(
-                       "Modalità", ["Day1", "Day2"], key='radio_modo', horizontal=True, label_visibility="collapsed",
-                       help="Day1: i gap che rispettano i filtri. Day2: la giornata successiva a ogni gap day1 filtrato "
-                            "(i filtri si applicano al day1), con gap cumulato e apertura sopra/sotto la chiusura del day1.")
-                   escludi_day2 = st.checkbox(
-                       "Escludi day-2", key='chk_day2', disabled=(modo_label == "Day2"),
-                       help=f"Esclude i gap il cui giorno precedente ha fatto gap ≥ {DAY2_GAP_MIN:.0f}% con volume > {DAY2_VOL_MIN/1_000_000:.0f}M: "
-                            "il movimento non nasce dal nulla ma prosegue uno già esistente.")
+                   c_modo, c_opzioni = st.columns([0.24, 0.76], gap="small")
+                   with c_modo:
+                       modo_label = st.radio("Modalità", ["Day1", "Day2"], key='radio_modo', label_visibility="collapsed")
+                   with c_opzioni:
+                       escludi_day2 = st.checkbox(
+                           "Escludi day-2", key='chk_day2', disabled=(modo_label == "Day2"),
+                           help=f"Esclude i gap il cui giorno precedente ha fatto gap ≥ {DAY2_GAP_MIN:.0f}% con volume > {DAY2_VOL_MIN/1_000_000:.0f}M: "
+                                "il movimento non nasce dal nulla ma prosegue uno già esistente.")
+                       c_up, c_down = st.columns(2, gap="small")
+                       with c_up:
+                           solo_up = st.checkbox("Gap UP", key='chk_up', disabled=(modo_label == "Day1"),
+                                                 help="Day2 che aprono sopra la chiusura del Day1")
+                       with c_down:
+                           solo_down = st.checkbox("Gap DOWN", key='chk_down', disabled=(modo_label == "Day1"),
+                                                   help="Day2 che aprono sotto la chiusura del Day1")
                modo = 'day2' if modo_label == "Day2" else 'day1'
                
            v_gaps, gaps_num, n_day2 = ricerca_gaps(nome_ticker, st.session_state['dati_storici'], \
-                                 gap_A, gap_B, volume*1_000_000, prezzo_A, prezzo_B, escludi_day2=escludi_day2, modo=modo)
+                                 gap_A, gap_B, volume*1_000_000, prezzo_A, prezzo_B, escludi_day2=escludi_day2, modo=modo,
+                                 solo_up=solo_up, solo_down=solo_down)
                                  
 
            
@@ -2244,6 +2267,15 @@ with col3:
                 st.markdown(
                     "<div style='font-size: 12px; color: var(--date-color); margin-top: -4px; margin-bottom: 2px; font-family: system-ui,-apple-system;'>"
                     "n/a: bilancio non classificato (tipico delle società finanziarie), attività e passività correnti non esistono</div>",
+                    unsafe_allow_html=True
+                )
+
+            # NESSUN BILANCIO XBRL: la società è presente sulla SEC (ha depositi) ma non ha ancora dati di bilancio strutturati
+            # (tipico di nuove quotazioni, spin-off ed emittenti esteri che hanno depositato solo la registrazione)
+            if sec_data.get('data_date', ' - ') == ' - ' and (sec_data.get('sec_links') or sec_data.get('active_offering_date', ' - ') != ' - '):
+                st.markdown(
+                    "<div style='font-size: 12px; color: #f57f17; margin-top: -4px; margin-bottom: 8px; font-family: system-ui,-apple-system;'>"
+                    "⚠️ Nessun bilancio in formato XBRL disponibile sulla SEC (tipico di nuove quotazioni e spin-off): consulta i depositi qui sotto</div>",
                     unsafe_allow_html=True
                 )
 
