@@ -1687,7 +1687,7 @@ with col1:
         """, unsafe_allow_html=True)
 
     with st.form(key=f'GAPs_Finder'):
-            nome_ticker = st.text_input('**GAPsFinder   1.08d_YF_AV**', placeholder='Enter the Ticker').strip()
+            nome_ticker = st.text_input('**GAPsFinder   1.08e_YF_AV**', placeholder='Enter the Ticker').strip()
             bottone_ricerca = st.form_submit_button('ricerca GAPs')
          
     stampa_col1 = st.empty()  
@@ -1911,12 +1911,15 @@ with col2:
                    <style>
                    div[data-testid="stVerticalBlock"]:has(> .st-key-radio_modo) {
                        display: grid !important;
-                       grid-template-columns: 78px auto 1fr;
+                       grid-template-columns: 80px 110px 120px;
+                       justify-content: start;
                        grid-template-rows: 40px 40px;
                        column-gap: 14px; row-gap: 6px;
                        align-items: center;
                    }
-                   div[data-testid="stVerticalBlock"]:has(> .st-key-radio_modo) > div { width: auto !important; }
+                   div[data-testid="stVerticalBlock"]:has(> .st-key-radio_modo) > div,
+                   .st-key-radio_modo, .st-key-chk_day2, .st-key-chk_up, .st-key-chk_down {
+                       width: auto !important; min-width: 0 !important; max-width: 100% !important; }
                    .st-key-radio_modo { grid-column: 1; grid-row: 1 / span 2; align-self: stretch;
                                         border-right: 1px solid rgba(128,128,128,0.35); }
                    .st-key-radio_modo div[role="radiogroup"] { display: grid !important; grid-template-rows: 40px 40px; row-gap: 6px; }
