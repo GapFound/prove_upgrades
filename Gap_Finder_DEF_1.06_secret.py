@@ -1687,7 +1687,7 @@ with col1:
         """, unsafe_allow_html=True)
 
     with st.form(key=f'GAPs_Finder'):
-            nome_ticker = st.text_input('**GAPsFinder   1.08e_YF_AV**', placeholder='Enter the Ticker').strip()
+            nome_ticker = st.text_input('**GAPsFinder   1.08f_YF_AV**', placeholder='Enter the Ticker').strip()
             bottone_ricerca = st.form_submit_button('ricerca GAPs')
          
     stampa_col1 = st.empty()  
@@ -1913,8 +1913,8 @@ with col2:
                        display: grid !important;
                        grid-template-columns: 80px 110px 120px;
                        justify-content: start;
-                       grid-template-rows: 40px 40px;
-                       column-gap: 14px; row-gap: 6px;
+                       grid-template-rows: 32px 32px;
+                       column-gap: 12px; row-gap: 4px;
                        align-items: center;
                    }
                    div[data-testid="stVerticalBlock"]:has(> .st-key-radio_modo) > div,
@@ -1922,12 +1922,16 @@ with col2:
                        width: auto !important; min-width: 0 !important; max-width: 100% !important; }
                    .st-key-radio_modo { grid-column: 1; grid-row: 1 / span 2; align-self: stretch;
                                         border-right: 1px solid rgba(128,128,128,0.35); }
-                   .st-key-radio_modo div[role="radiogroup"] { display: grid !important; grid-template-rows: 40px 40px; row-gap: 6px; }
+                   .st-key-radio_modo div[role="radiogroup"] { display: grid !important; grid-template-rows: 32px 32px; row-gap: 4px; }
                    .st-key-radio_modo div[role="radiogroup"] label { margin: 0 !important; align-items: center; }
                    .st-key-chk_day2 { grid-column: 2 / span 2; grid-row: 1; }
                    .st-key-chk_up   { grid-column: 2; grid-row: 2; }
                    .st-key-chk_down { grid-column: 3; grid-row: 2; }
                    .st-key-chk_day2 p, .st-key-chk_up p, .st-key-chk_down p { font-size: 12.5px !important; }
+                   /* riquadro stretto attorno al contenuto (solo il riquadro, non le colonne esterne) */
+                   div[data-testid="stVerticalBlockBorderWrapper"]:has(> div[data-testid="stVerticalBlock"] > .st-key-radio_modo),
+                   div[data-testid="stVerticalBlockBorderWrapper"]:has(> div > div[data-testid="stVerticalBlock"] > .st-key-radio_modo) {
+                       width: fit-content !important; padding: 6px 14px !important; }
                    </style>
                """, unsafe_allow_html=True)
                with st.container(border=True):
