@@ -1687,7 +1687,7 @@ with col1:
         """, unsafe_allow_html=True)
 
     with st.form(key=f'GAPs_Finder'):
-            nome_ticker = st.text_input('**GAPsFinder   1.08_YF_AV**', placeholder='Enter the Ticker').strip()
+            nome_ticker = st.text_input('**GAPsFinder   1.08d_YF_AV**', placeholder='Enter the Ticker').strip()
             bottone_ricerca = st.form_submit_button('ricerca GAPs')
          
     stampa_col1 = st.empty()  
@@ -1904,33 +1904,39 @@ with col2:
                # RIQUADRO MODALITA' A TABELLA (2 righe):
                #   Day1 | [ ] Escludi day-2
                #   Day2 | [ ] Gap UP   [ ] Gap DOWN
+               # Streamlit non consente colonne annidate oltre un livello (siamo gia' dentro col2 > col2_2),
+               # quindi la tabella e' costruita con una griglia CSS sui 4 widget del riquadro.
                # Le opzioni di ogni riga sono attive solo quando la relativa modalita' e' selezionata.
-               # Altezze fisse (40px) e spaziatura (16px) allineano le due voci del radio alle due righe di opzioni.
                st.markdown("""
                    <style>
-                   .st-key-radio_modo { border-right: 1px solid rgba(128,128,128,0.35); padding-right: 6px; }
-                   .st-key-radio_modo div[role="radiogroup"] { gap: 16px !important; flex-direction: column; }
-                   .st-key-radio_modo div[role="radiogroup"] label { height: 40px; margin: 0 !important; align-items: center; }
-                   .st-key-chk_day2, .st-key-chk_up, .st-key-chk_down { height: 40px; display: flex; align-items: center; }
+                   div[data-testid="stVerticalBlock"]:has(> .st-key-radio_modo) {
+                       display: grid !important;
+                       grid-template-columns: 78px auto 1fr;
+                       grid-template-rows: 40px 40px;
+                       column-gap: 14px; row-gap: 6px;
+                       align-items: center;
+                   }
+                   div[data-testid="stVerticalBlock"]:has(> .st-key-radio_modo) > div { width: auto !important; }
+                   .st-key-radio_modo { grid-column: 1; grid-row: 1 / span 2; align-self: stretch;
+                                        border-right: 1px solid rgba(128,128,128,0.35); }
+                   .st-key-radio_modo div[role="radiogroup"] { display: grid !important; grid-template-rows: 40px 40px; row-gap: 6px; }
+                   .st-key-radio_modo div[role="radiogroup"] label { margin: 0 !important; align-items: center; }
+                   .st-key-chk_day2 { grid-column: 2 / span 2; grid-row: 1; }
+                   .st-key-chk_up   { grid-column: 2; grid-row: 2; }
+                   .st-key-chk_down { grid-column: 3; grid-row: 2; }
                    .st-key-chk_day2 p, .st-key-chk_up p, .st-key-chk_down p { font-size: 12.5px !important; }
                    </style>
                """, unsafe_allow_html=True)
                with st.container(border=True):
-                   c_modo, c_opzioni = st.columns([0.24, 0.76], gap="small")
-                   with c_modo:
-                       modo_label = st.radio("Modalità", ["Day1", "Day2"], key='radio_modo', label_visibility="collapsed")
-                   with c_opzioni:
-                       escludi_day2 = st.checkbox(
-                           "Escludi day-2", key='chk_day2', disabled=(modo_label == "Day2"),
-                           help=f"Esclude i gap il cui giorno precedente ha fatto gap ≥ {DAY2_GAP_MIN:.0f}% con volume > {DAY2_VOL_MIN/1_000_000:.0f}M: "
-                                "il movimento non nasce dal nulla ma prosegue uno già esistente.")
-                       c_up, c_down = st.columns(2, gap="small")
-                       with c_up:
-                           solo_up = st.checkbox("Gap UP", key='chk_up', disabled=(modo_label == "Day1"),
-                                                 help="Day2 che aprono sopra la chiusura del Day1")
-                       with c_down:
-                           solo_down = st.checkbox("Gap DOWN", key='chk_down', disabled=(modo_label == "Day1"),
-                                                   help="Day2 che aprono sotto la chiusura del Day1")
+                   modo_label = st.radio("Modalità", ["Day1", "Day2"], key='radio_modo', label_visibility="collapsed")
+                   escludi_day2 = st.checkbox(
+                       "Escludi day-2", key='chk_day2', disabled=(modo_label == "Day2"),
+                       help=f"Esclude i gap il cui giorno precedente ha fatto gap ≥ {DAY2_GAP_MIN:.0f}% con volume > {DAY2_VOL_MIN/1_000_000:.0f}M: "
+                            "il movimento non nasce dal nulla ma prosegue uno già esistente.")
+                   solo_up = st.checkbox("Gap UP", key='chk_up', disabled=(modo_label == "Day1"),
+                                         help="Day2 che aprono sopra la chiusura del Day1")
+                   solo_down = st.checkbox("Gap DOWN", key='chk_down', disabled=(modo_label == "Day1"),
+                                           help="Day2 che aprono sotto la chiusura del Day1")
                modo = 'day2' if modo_label == "Day2" else 'day1'
                
            v_gaps, gaps_num, n_day2 = ricerca_gaps(nome_ticker, st.session_state['dati_storici'], \
