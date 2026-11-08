@@ -78,6 +78,8 @@ def format_millions(val, currency='USD'):
     try:
         val = float(val)
         symbol = CURRENCY_SYMBOLS.get(str(currency).upper(), f"{currency} ")
+        if val < 0:
+            return "-" + format_millions(-val, currency)
         if abs(val) >= 10**9:
             return f"{symbol}{val/10**9:.2f}B"
         elif abs(val) >= 10**6:
@@ -274,7 +276,21 @@ def fetch_stockanalysis_stats(nome_ticker):
         print("Errore scraping StockAnalysis:", e)
     return default_stats
 
-# FUNZIONE PER SCARICARE I DATI DI CASSA E RISK DILUTION DIRETTAMENTE DALLA SEC EDGAR (100% GRATUITA ED ILLIMITATA)
+# CIK DI RISERVA DALL'ELENCO UFFICIALE SEC TICKER -> CIK (cache 24 ore)
+# Serve quando il profilo Polygon non riporta il CIK (tipico di IPO, spin-off e quotazioni recenti)
+@st.cache_data(ttl=86400, show_spinner=False)
+def _sec_ticker_map():
+    res = requests.get("https://www.sec.gov/files/company_tickers.json", headers=SEC_HEADERS, timeout=15)
+    res.raise_for_status()
+    return {str(v.get('ticker', '')).upper(): str(v.get('cik_str', '')) for v in res.json().values()}
+
+def sec_cik_from_ticker(nome_ticker):
+    try:
+        return _sec_ticker_map().get(str(nome_ticker).upper().strip(), '')
+    except Exception as e:
+        print("Errore recupero CIK dall'elenco SEC:", e)
+        return ''
+
 # FUNZIONE PER SCARICARE I DATI DI CASSA E RISK DILUTION DIRETTAMENTE DALLA SEC EDGAR (100% GRATUITA ED ILLIMITATA)
 def fetch_sec_data(cik):
     default_sec = {
@@ -290,6 +306,8 @@ def fetch_sec_data(cik):
         'active_offering_link': ' - ',
         'sec_links': [],
         'currency': ' - ',
+        'net_equity': ' - ',
+        'net_equity_negative': False,
         'data_date': ' - ',
         'data_form': ' - '
     }
@@ -314,6 +332,7 @@ def fetch_sec_data(cik):
         runway_str = " - "
         ratio_str = " - "
         liq_str = " - "
+        net_equity_val = None
         cash_currency = 'USD'
         cash_end_dt = None
         cash_form = None
@@ -343,6 +362,25 @@ def fetch_sec_data(cik):
             
             if cash_val is None:
                 risk_status = "UNKNOWN"
+            
+            # PATRIMONIO NETTO = ATTIVITA' TOTALI - PASSIVITA' TOTALI (stessa valuta e stessa data di bilancio)
+            # Se le passività totali non sono dichiarate, si usa il patrimonio netto dichiarato
+            tot_assets, _, _, _, ta_end = get_latest_fact(facts_root, ['Assets'], currency=cash_currency)
+            tot_liab, _, _, _, tl_end = get_latest_fact(facts_root, ['Liabilities'], currency=cash_currency)
+            if tot_assets is not None and tot_liab is not None and ta_end == tl_end:
+                net_equity_val = tot_assets - tot_liab
+            else:
+                equity_tags = ['StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest',
+                               'StockholdersEquity', 'Equity']
+                net_equity_val, _, _, _, _ = get_latest_fact(facts_root, equity_tags, currency=cash_currency)
+            if net_equity_val is not None and net_equity_val < 0:
+                risk_status = "RED"
+            
+            # BILANCIO NON CLASSIFICATO (banche, assicurazioni, società finanziarie): non esistono
+            # attività e passività correnti, quindi i due rapporti non sono calcolabili per definizione
+            if cash_val is not None and assets_val is None and liabilities_val is None:
+                ratio_str = "n/a"
+                liq_str = "n/a"
             
             # Calcolo dei Ratio di solvibilità immediati
             ratio_val = None
@@ -496,7 +534,7 @@ def fetch_sec_data(cik):
                 doc = primary_docs[i]
                 sec_link = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc_no}/{doc}"
                 
-                if form_type in ["10-K", "10-Q", "20-F", "40-F", "S-1", "S-3", "F-1", "F-3", "424B3", "424B4", "424B5"]:
+                if form_type in ["10-K", "10-Q", "20-F", "40-F", "20FR12B", "S-1", "S-3", "F-1", "F-3", "424B3", "424B4", "424B5"]:
                     filing_id = (filing_date, form_type)
                     if filing_id not in seen_filings:
                         if links_count < 3:
@@ -547,6 +585,9 @@ def fetch_sec_data(cik):
                     except Exception as e:
                         print("Errore nel parsing del testo parziale del documento SEC:", e)
                     
+        if net_equity_val is not None and net_equity_val < 0:
+            risk_status = "RED"
+        
         return {
             'cash_on_hand': format_millions(cash_val, cash_currency) if cash_val is not None else ' - ',
             'monthly_burn': format_millions(monthly_burn_val, cash_currency) if monthly_burn_val is not None else ' - ',
@@ -560,6 +601,8 @@ def fetch_sec_data(cik):
             'active_offering_link': active_offering_link,
             'sec_links': sec_links,
             'currency': cash_currency if cash_val is not None else ' - ',
+            'net_equity': format_millions(net_equity_val, cash_currency) if net_equity_val is not None else ' - ',
+            'net_equity_negative': bool(net_equity_val is not None and net_equity_val < 0),
             'data_date': cash_end_dt.strftime("%Y-%m-%d") if cash_end_dt else ' - ',
             'data_form': cash_form if cash_form else ' - '
         }
@@ -1348,32 +1391,60 @@ def datagathering_func(nome_ticker):
 # Ritorna: (tabella formattata per la visualizzazione, tabella numerica, numero di day-2 nel filtro)
 # DAY-2: gap il cui GIORNO PRECEDENTE ha fatto gap >= DAY2_GAP_MIN con volume > DAY2_VOL_MIN
 # (il movimento non nasce dal nulla ma e' la prosecuzione di uno gia' esistente)
-def ricerca_gaps(nome_ticker, dati_storici, gap_perc_A, gap_perc_B, volume, prezzo_A, prezzo_B, escludi_day2=True):
+#
+# modo='day1': i gap che rispettano i filtri (con esclusione opzionale dei day-2)
+# modo='day2': la giornata SUCCESSIVA a ogni gap day1 che rispetta i filtri (gap, volume e prezzo si applicano al day1).
+#              La colonna Gap riporta il gap cumulato dalla chiusura precedente al day1 fino all'open del day2,
+#              tra parentesi il gap del day1 e quello del day2. La colonna 'vs Close D1' indica se il day2
+#              apre sopra (UP) o sotto (DOWN) la chiusura del day1.
+def ricerca_gaps(nome_ticker, dati_storici, gap_perc_A, gap_perc_B, volume, prezzo_A, prezzo_B, escludi_day2=True, modo='day1'):
     global gaps
     colonne = ['Date', 'Gap %', 'Open', 'High', 'Low', 'Close', 'Max % UP', 'Max % DOWN',
                'Open to Close %', 'Chiusura', 'Volume']
-    gaps = dati_storici[colonne].copy()
+    df = dati_storici.reset_index(drop=True)
     
-    is_day2 = (dati_storici['Gap %'].shift(1) >= DAY2_GAP_MIN) & (dati_storici['Volume'].shift(1) > DAY2_VOL_MIN)
+    is_day2 = (df['Gap %'].shift(1) >= DAY2_GAP_MIN) & (df['Volume'].shift(1) > DAY2_VOL_MIN)
     
-    filtro = (gaps['Gap %']>=gap_perc_A) & (gaps['Gap %']<=gap_perc_B) & \
-             (gaps['Volume']>=volume) & (gaps['Open']>=prezzo_A) & (gaps['Open']<=prezzo_B)
+    filtro = (df['Gap %']>=gap_perc_A) & (df['Gap %']<=gap_perc_B) & \
+             (df['Volume']>=volume) & (df['Open']>=prezzo_A) & (df['Open']<=prezzo_B)
     
     n_day2 = int((filtro & is_day2).sum())
-    if escludi_day2:
-        filtro = filtro & ~is_day2
+    colonne_num = ['Gap %', 'Open', 'High', 'Low', 'Close', 'Max % UP', 'Max % DOWN', 'Open to Close %']
     
-    gaps = gaps[filtro]
+    if modo == 'day2':
+        # posizioni dei day1 che hanno un giorno successivo disponibile
+        pos_d1 = [p for p in np.flatnonzero(filtro.values) if p + 1 < len(df)]
+        pos_d2 = [p + 1 for p in pos_d1]
+        gaps = df.iloc[pos_d2][colonne].copy()
+        gap_d1 = df['Gap %'].iloc[pos_d1].values
+        gap_d2 = df['Gap %'].iloc[pos_d2].values
+        # gap cumulato composto: (1+g1)*(1+g2)-1, calcolato sui gap gia' corretti per gli split
+        gaps['Gap %'] = ((1 + gap_d1/100) * (1 + gap_d2/100) - 1) * 100
+        gaps['Gap D1 %'] = gap_d1
+        gaps['Gap D2 %'] = gap_d2
+        gaps['vs Close D1'] = np.where(gap_d2 > 0, 'UP', np.where(gap_d2 < 0, 'DOWN', '='))
+    else:
+        if escludi_day2:
+            filtro = filtro & ~is_day2
+        gaps = df[filtro][colonne].copy()
     
     if not gaps.empty:    
         display_gaps = gaps.copy()
         display_gaps['Volume'] = display_gaps.apply(lambda x: f"{x['Volume']:,.0f}".replace(',', '.'), axis=1)
         display_gaps = display_gaps.round(2)
             
-        display_gaps[['Gap %', 'Open', 'High', 'Low', 'Close', 'Max % UP',
-               'Max % DOWN', 'Open to Close %']]=\
-        display_gaps[['Gap %', 'Open', 'High', 'Low', 'Close', 'Max % UP',
-               'Max % DOWN', 'Open to Close %']].astype(str).apply(lambda x: x.str.replace('.', ',', regex=False))
+        display_gaps[colonne_num] = display_gaps[colonne_num].astype(str).apply(lambda x: x.str.replace('.', ',', regex=False))
+        
+        if modo == 'day2':
+            fmt = lambda v: f"{v:.2f}".replace('.', ',')
+            display_gaps['Gap %'] = [f"{fmt(c)} ({fmt(a)} / {fmt(b)})" for c, a, b in
+                                     zip(gaps['Gap %'], gaps['Gap D1 %'], gaps['Gap D2 %'])]
+            display_gaps = display_gaps.drop(columns=['Gap D1 %', 'Gap D2 %'])
+            display_gaps = display_gaps.rename(columns={'Gap %': 'Gap % cum (D1 / D2)'})
+            # 'vs Close D1' subito dopo la colonna del gap
+            ordine = ['Date', 'Gap % cum (D1 / D2)', 'vs Close D1'] + \
+                     [c for c in display_gaps.columns if c not in ['Date', 'Gap % cum (D1 / D2)', 'vs Close D1']]
+            display_gaps = display_gaps[ordine]
             
         display_gaps.reset_index(drop=True, inplace=True)
         display_gaps.index = display_gaps.index+1
@@ -1620,6 +1691,7 @@ with col1:
         st.session_state['slider_volume']=1
         st.session_state['slider_price']=(2, 200)
         st.session_state['chk_day2']=True
+        st.session_state['radio_modo']='Day1'
         
         CACHE_DIR = "cache"
         os.makedirs(CACHE_DIR, exist_ok=True)
@@ -1819,13 +1891,28 @@ with col2:
                volume = st.slider("**Volume Minimo Mln**", 0, 500, step=1, key='slider_volume')
                prezzo_A, prezzo_B = st.slider('**prezzo minimo $**', 0, 200, step=1, key='slider_price')
                st.write("")
-               escludi_day2 = st.checkbox(
-                   "Escludi day-2", key='chk_day2',
-                   help=f"Esclude i gap il cui giorno precedente ha fatto gap ≥ {DAY2_GAP_MIN:.0f}% con volume > {DAY2_VOL_MIN/1_000_000:.0f}M: "
-                        "il movimento non nasce dal nulla ma prosegue uno già esistente.")
+               
+               # RIQUADRO MODALITA' DAY1 / DAY2 CON SOTTO-FLAG "ESCLUDI DAY-2" (carattere piu' piccolo e rientrato)
+               st.markdown("""
+                   <style>
+                   .st-key-chk_day2 { margin-left: 26px; margin-top: -10px; }
+                   .st-key-chk_day2 p { font-size: 12.5px !important; }
+                   .st-key-radio_modo label[data-baseweb="radio"] { margin-right: 18px; }
+                   </style>
+               """, unsafe_allow_html=True)
+               with st.container(border=True):
+                   modo_label = st.radio(
+                       "Modalità", ["Day1", "Day2"], key='radio_modo', horizontal=True, label_visibility="collapsed",
+                       help="Day1: i gap che rispettano i filtri. Day2: la giornata successiva a ogni gap day1 filtrato "
+                            "(i filtri si applicano al day1), con gap cumulato e apertura sopra/sotto la chiusura del day1.")
+                   escludi_day2 = st.checkbox(
+                       "Escludi day-2", key='chk_day2', disabled=(modo_label == "Day2"),
+                       help=f"Esclude i gap il cui giorno precedente ha fatto gap ≥ {DAY2_GAP_MIN:.0f}% con volume > {DAY2_VOL_MIN/1_000_000:.0f}M: "
+                            "il movimento non nasce dal nulla ma prosegue uno già esistente.")
+               modo = 'day2' if modo_label == "Day2" else 'day1'
                
            v_gaps, gaps_num, n_day2 = ricerca_gaps(nome_ticker, st.session_state['dati_storici'], \
-                                 gap_A, gap_B, volume*1_000_000, prezzo_A, prezzo_B, escludi_day2=escludi_day2)
+                                 gap_A, gap_B, volume*1_000_000, prezzo_A, prezzo_B, escludi_day2=escludi_day2, modo=modo)
                                  
 
            
@@ -1846,7 +1933,11 @@ with col2:
                render_table_with_slider(v_gaps, key="gaps", reset_index=True, font_px=11.5, width_pct=95)
                
                # NOTA TRASPARENTE SUL FILTRO DAY-2 (sempre visibile sotto le statistiche)
-               if escludi_day2:
+               if modo == 'day2':
+                   n_up = int((gaps_num['vs Close D1'] == 'UP').sum())
+                   n_down = int((gaps_num['vs Close D1'] == 'DOWN').sum())
+                   nota_day2 = f"Day2: giornate successive ai gap filtrati &nbsp;|&nbsp; apertura vs close D1: <b>UP {n_up}</b> · <b>DOWN {n_down}</b> &nbsp;|&nbsp; Mediana Gap = gap cumulato"
+               elif escludi_day2:
                    nota_day2 = f"day-2 esclusi: {n_day2}" if n_day2 > 0 else "day-2 esclusi: nessuno"
                else:
                    nota_day2 = f"day-2 inclusi nel campione: {n_day2}"
@@ -1944,6 +2035,9 @@ with col3:
         cik = ""
         if isinstance(cached_profile, dict):
             cik = cached_profile.get('cik', '')
+        # CIK DI RISERVA: se Polygon non lo fornisce (quotazioni recenti, spin-off) lo cerchiamo nell'elenco SEC
+        if not cik or str(cik).strip() in ['', '-', ' - ']:
+            cik = sec_cik_from_ticker(nome_ticker)
             
         # CHIAMATA 100% DINAMICA IN REAL-TIME AD OGNI RICHIESTA (NESSUNA CACHE SU SEC EDGAR)
         sec_data = fetch_sec_data(cik)
@@ -2082,6 +2176,15 @@ with col3:
             except:
                 pass
 
+            # PATRIMONIO NETTO: rosso se negativo, verde se positivo
+            net_equity_str = sec_data.get('net_equity', ' - ')
+            if net_equity_str == ' - ':
+                ne_color = "#333"
+            elif sec_data.get('net_equity_negative'):
+                ne_color = "#c62828"
+            else:
+                ne_color = "#2e7d32"
+
             # Estrazione variabili locali per evitare conflitti di apici
             cash_on_hand_val = sec_data.get('cash_on_hand', ' - ')
             monthly_burn_val_str = sec_data.get('monthly_burn', ' - ')
@@ -2093,6 +2196,7 @@ with col3:
             mb_tooltip = 'Monthly Burn <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">velocità media mensile di utilizzo delle riserve liquide</span></span>'
             rc_tooltip = 'Runway Cassa <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">autonomia di cassa in mesi, prima del completo esaurimento delle riserve</span></span>'
             car_tooltip = 'Cash / Current Assets % <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">indica la percentuale delle attività correnti, sostenuta da cassa liquida reale</span></span>'
+            ne_tooltip = 'Patrimonio Netto <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">attività totali meno passività totali, se negativo i debiti superano tutto ciò che la società possiede, rischio elevato di diluizione o insolvenza</span></span>'
             ltr_tooltip = 'Liquidity Test Ratio <span class="gf-tooltip" style="display:inline-block; width:11px; height:11px; line-height:10px; border:1px solid #000000; border-radius:50%; text-align:center; font-size:7.5px; font-weight:bold; color:#000000; font-family:system-ui; vertical-align:middle; margin-left:4px; cursor:help;">?<span class="gf-tooltiptext">rapporto tra cassa liquida e passività correnti (debiti entro l\'anno), un valore inferiore a 1.2 indica un alto rischio di insolvenza immediata e diluizione forzata</span></span>'
 
             # 1. AUTONOMIA DI CASSA (CASH RUNWAY) IN CIMA AL COCKPIT
@@ -2128,9 +2232,20 @@ with col3:
                     <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">{ltr_tooltip}</div>
                     <div style="font-size: 18px; font-weight: bold; color: {liq_color};">{liquidity_test_val}</div>
                 </div>
+                <div style="flex: 1; background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 4px; text-align: center;">
+                    <div style="font-size: 11px; color: var(--date-color); font-weight: bold; margin-bottom: 4px; text-transform: uppercase;">{ne_tooltip}</div>
+                    <div style="font-size: 18px; font-weight: bold; color: {ne_color};">{net_equity_str}</div>
+                </div>
             </div>
             """
             st.markdown(metrics_bottom_html, unsafe_allow_html=True)
+
+            if sec_data.get('current_assets_ratio') == 'n/a':
+                st.markdown(
+                    "<div style='font-size: 12px; color: var(--date-color); margin-top: -4px; margin-bottom: 2px; font-family: system-ui,-apple-system;'>"
+                    "n/a: bilancio non classificato (tipico delle società finanziarie), attività e passività correnti non esistono</div>",
+                    unsafe_allow_html=True
+                )
 
             # DATA DI RIFERIMENTO DEL BILANCIO E VALUTA: un runway senza data non ha significato
             # (gli emittenti esteri spesso depositano un solo bilancio XBRL l'anno)
